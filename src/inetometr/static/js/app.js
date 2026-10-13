@@ -56,20 +56,30 @@ async function measureDownload() {
 }
 
 async function measureUpload() {
-  const payload = new Uint8Array(2 * 1024 * 1024);
+  const payload = new Uint8Array(2 * 1024 * 1024); // 2 MB
   let best = 0;
   for (let i = 0; i < 2; i++) {
     try {
       const t0 = performance.now();
-      const r = await fetch('/upload', { method: 'POST', body: payload });
+      const r = await fetch('/upload', {
+        method: 'POST',
+        body: payload,
+        // Prevent caching of the POST request
+        headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+      });
       const sec = (performance.now() - t0) / 1000;
       if (r.status === 200 && sec > 0.001) {
         best = Math.max(best, payload.byteLength * 8 / sec / 1e6);
+      } else if (r.status !== 200) {
+        // Log the error status for debugging (silent in production)
+        console.debug('Upload response status:', r.status);
       }
     } catch (e) {
-      // silent fail
+      // Network or fetch error – keep best at 0
+      console.debug('Upload measurement error:', e);
     }
   }
+  // Return 0 if no valid measurement was obtained
   return Math.round(best * 10) / 10;
 }
 
