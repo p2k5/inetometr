@@ -1,0 +1,259 @@
+/* Inetometr Design Tokens — 3-tier architecture: primitive → semantic → component */
+/* Generated from design-doctrine. Never reference primitives directly in components. */
+
+/* ============================================================
+   PRIMITIVE TOKENS — raw palette values
+   ============================================================ */
+:root {
+  /* Neutral scale — near-black to white */
+  --primitives-neutral-0:   #0a0e1a;
+  --primitives-neutral-10:  #131926;
+  --primitives-neutral-20:  #1c2436;
+  --primitives-neutral-30:  #26304a;
+  --primitives-neutral-40:  #3a4563;
+  --primitives-neutral-50:  #8b93a7;
+  --primitives-neutral-60:  #c2c8db;
+  --primitives-neutral-70:  #e6e9f0;
+  --primitives-neutral-80:  #f1f3f8;
+  --primitives-neutral-90:  #ffffff;
+
+  /* Accent — Yandex red (single accent), darkened for WCAG AA text contrast */
+  --primitives-accent-100:  #b8451a;
+  --primitives-accent-200:  #d4541f;
+  --primitives-accent-300:  #e8501a;
+  --primitives-accent-400:  #c84015;
+  --primitives-accent-500:  #a03310;
+
+  /* Feedback colors (used semantically, not as accents) */
+  --primitives-feedback-success: #34d399;
+  --primitives-feedback-warning:  #fbbf24;
+  --primitives-feedback-error:    #ef4444;
+  --primitives-feedback-info:     #60a5fa;
+}
+
+/* ============================================================
+   LIGHT MODE OVERRIDES — swap at semantic level
+   ============================================================ */
+[data-theme="light"] {
+  --primitives-neutral-0:   #ffffff;
+  --primitives-neutral-10:  #f8f9fc;
+  --primitives-neutral-20:  #eef1f7;
+  --primitives-neutral-30:  #dce1ec;
+  --primitives-neutral-40:  #b8c0d1;
+  --primitives-neutral-50:  #8b93a7;
+  --primitives-neutral-60:  #5d677d;
+  --primitives-neutral-70:  #1c2436;
+  --primitives-neutral-80:  #131926;
+  --primitives-neutral-90:  #0a0e1a;
+}
+
+/* ============================================================
+   SEMANTIC TOKENS — purpose-based aliases (use in designs)
+   ============================================================ */
+:root {
+  /* Surfaces */
+  --semantic-surface-page:      var(--primitives-neutral-0);
+  --semantic-surface-card:      var(--primitives-neutral-10);
+  --semantic-surface-elevated:  var(--primitives-neutral-20);
+  --semantic-surface-hover:     var(--primitives-neutral-20);
+  --semantic-surface-active:    var(--primitives-neutral-30);
+
+  /* Text */
+  --semantic-text-primary:      var(--primitives-neutral-70);
+  --semantic-text-secondary:    var(--primitives-neutral-60);
+  --semantic-text-muted:        var(--primitives-neutral-50);
+  --semantic-text-inverse:      var(--primitives-neutral-90);
+  --semantic-text-on-accent:    #ffffff;
+
+  /* Borders */
+  --semantic-border-default:    var(--primitives-neutral-30);
+  --semantic-border-strong:     var(--primitives-neutral-40);
+  --semantic-border-focus:      var(--primitives-accent-300);
+
+  /* Action (interactive) — single primary accent */
+  --semantic-action-primary:        var(--primitives-accent-400);
+  --semantic-action-primary-hover:  var(--primitives-accent-500);
+  --semantic-action-primary-active: var(--primitives-accent-500);
+  --semantic-action-primary-disabled: var(--primitives-accent-100);
+
+  /* Feedback */
+  --semantic-feedback-success: var(--primitives-feedback-success);
+  --semantic-feedback-warning: var(--primitives-feedback-warning);
+  --semantic-feedback-error:   var(--primitives-feedback-error);
+  --semantic-feedback-info:    var(--primitives-feedback-info);
+
+  /* Focus ring */
+  --semantic-focus-ring:       var(--primitives-accent-300);
+  --semantic-focus-ring-width: 2px;
+  --semantic-focus-ring-offset: 2px;
+
+  /* Shadows / elevation */
+  --semantic-shadow-sm:  0 1px 2px rgba(0,0,0,.3);
+  --semantic-shadow-md:  0 4px 12px rgba(0,0,0,.35);
+  --semantic-shadow-lg:  0 8px 32px rgba(0,0,0,.4);
+
+  /* Typography — Major Third scale (1.25) */
+  --semantic-font-ui:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --semantic-font-mono:  ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --semantic-text-xs:   0.75rem;   /* 12px */
+  --semantic-text-sm:   0.875rem;  /* 14px */
+  --semantic-text-base: 1rem;      /* 16px */
+  --semantic-text-lg:   1.125rem;  /* 18px */
+  --semantic-text-xl:   1.25rem;   /* 20px */
+  --semantic-text-2xl:  1.5rem;    /* 24px */
+  --semantic-text-3xl:  1.875rem;  /* 30px */
+  --semantic-text-4xl:  2.25rem;   /* 36px */
+  --semantic-text-5xl:  3rem;      /* 48px */
+  --semantic-text-6xl:  3.75rem;   /* 60px */
+  --semantic-text-7xl:  4.5rem;    /* 72px */
+
+  /* Line heights */
+  --semantic-leading-tight:   1.25;
+  --semantic-leading-normal:  1.5;
+  --semantic-leading-relaxed: 1.625;
+
+  /* Font weights */
+  --semantic-weight-regular:   400;
+  --semantic-weight-medium:    500;
+  --semantic-weight-semibold:  600;
+  --semantic-weight-bold:      700;
+
+  /* Spacing — 4px base unit */
+  --semantic-space-0:   0;
+  --semantic-space-1:   0.25rem;  /* 4px */
+  --semantic-space-2:   0.5rem;   /* 8px */
+  --semantic-space-3:   0.75rem;  /* 12px */
+  --semantic-space-4:   1rem;     /* 16px */
+  --semantic-space-5:   1.25rem;  /* 20px */
+  --semantic-space-6:   1.5rem;   /* 24px */
+  --semantic-space-7:   1.75rem;  /* 28px */
+  --semantic-space-8:   2rem;     /* 32px */
+  --semantic-space-10:  2.5rem;   /* 40px */
+  --semantic-space-12:  3rem;     /* 48px */
+  --semantic-space-14:  3.5rem;   /* 56px */
+  --semantic-space-16:  4rem;     /* 64px */
+
+  /* Radius */
+  --semantic-radius-sm:   0.375rem;  /* 6px */
+  --semantic-radius-md:   0.5rem;    /* 8px */
+  --semantic-radius-lg:   0.75rem;   /* 12px */
+  --semantic-radius-xl:   1rem;      /* 16px */
+  --semantic-radius-2xl:  1.5rem;    /* 24px */
+  --semantic-radius-full: 9999px;
+
+  /* Transitions / Motion */
+  --semantic-duration-fast:  80ms;
+  --semantic-duration-base:  150ms;
+  --semantic-duration-slow:  300ms;
+  --semantic-duration-reduced: 0.01ms;
+  --semantic-easing-ease:    ease;
+  --semantic-easing-ease-out: ease-out;
+  /* Reduced motion iteration count */
+  --semantic-iteration-reduced: 1;
+
+  /* Breakpoints (mobile-first) */
+  --semantic-bp-sm:  480px;
+  --semantic-bp-md:  768px;
+  --semantic-bp-lg:  1024px;
+  --semantic-bp-xl:  1280px;
+}
+
+/* ============================================================
+   COMPONENT TOKENS — scoped to components (use in code)
+   ============================================================ */
+:root {
+  /* Button */
+  --component-btn-height:          44px;
+  --component-btn-padding-x:       var(--semantic-space-10);
+  --component-btn-radius:          var(--semantic-radius-full);
+  --component-btn-font-size:       var(--semantic-text-base);
+  --component-btn-font-weight:     var(--semantic-weight-semibold);
+  --component-btn-primary-bg:      var(--semantic-action-primary);
+  --component-btn-primary-hover:   var(--semantic-action-primary-hover);
+  --component-btn-primary-active:  var(--semantic-action-primary-active);
+  --component-btn-primary-disabled: var(--semantic-action-primary-disabled);
+  --component-btn-text:            var(--semantic-text-on-accent);
+  --component-btn-focus-ring:      var(--semantic-focus-ring);
+  --component-btn-focus-offset:    var(--semantic-focus-ring-offset);
+
+  /* Card */
+  --component-card-padding:       var(--semantic-space-8);
+  --component-card-padding-sm:    var(--semantic-space-6);
+  --component-card-radius:        var(--semantic-radius-xl);
+  --component-card-border:        1px solid var(--semantic-border-default);
+  --component-card-shadow:        var(--semantic-shadow-lg);
+
+  /* Metric chips */
+  --component-metric-padding:     var(--semantic-space-4);
+  --component-metric-radius:      var(--semantic-radius-md);
+  --component-metric-value-size:  var(--semantic-text-3xl);
+  --component-metric-label-size:  var(--semantic-text-xs);
+  --component-metric-gap:         var(--semantic-space-3);
+
+  /* Hero metric */
+  --component-hero-value-size:    clamp(48px, 16vw, 72px);
+  --component-hero-value-size-sm: clamp(34px, 22vw, 48px);
+  --component-hero-unit-size:     var(--semantic-text-xl);
+  --component-hero-label-size:    var(--semantic-text-sm);
+  --component-card-max-width:     640px;
+  --component-direction-gap:      2px;
+  /* Hero min/max value sizes */
+  --component-hero-value-min:     34px;
+  --component-hero-value-max:     48px;
+  /* Admin panel */
+  --component-admin-card-min-width: 140px;
+
+  /* Progress bar */
+  --component-progress-height:    6px;
+  --component-progress-radius:    var(--semantic-radius-full);
+  --component-progress-bg:        var(--semantic-surface-elevated);
+  --component-progress-fill:      var(--semantic-action-primary);
+
+  /* Status / Toast */
+  --component-status-min-height:  22px;
+  --component-status-font-size:   var(--semantic-text-sm);
+
+  /* Table (admin) */
+  --component-table-header-bg:    var(--primitives-neutral-30);
+  --component-table-row-alt:      var(--primitives-neutral-20);
+  --component-table-cell-padding: var(--semantic-space-3) var(--semantic-space-4);
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: var(--semantic-duration-reduced) !important;
+    animation-iteration-count: var(--semantic-iteration-reduced) !important;
+    transition-duration: var(--semantic-duration-reduced) !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   HIGH CONTRAST MODE (forced-colors)
+   ============================================================ */
+@media (forced-colors: active) {
+  :root {
+    --semantic-action-primary:       CanvasText;
+    --semantic-action-primary-hover: Highlight;
+    --semantic-action-primary-active: CanvasText;
+    --semantic-border-default:       CanvasText;
+    --semantic-border-strong:        CanvasText;
+    --semantic-focus-ring:           Highlight;
+    /* Focus ring width/offset for forced-colors - use tokens */
+    --component-focus-ring-width:    2px;
+    --component-focus-ring-offset:   2px;
+  }
+  .btn {
+    border: 1px solid currentColor;
+  }
+  .btn:focus-visible {
+    outline: var(--component-focus-ring-width) solid Highlight;
+    outline-offset: var(--component-focus-ring-offset);
+  }
+}

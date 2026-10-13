@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Inetometr. Замер скорости интернета: пинг, скорость загрузки и передачи.">
+    <title>Inetometr. Скорость интернета</title>
+
+    <link rel="preload" href="../static/css/tokens.css" as="style">
+    <link rel="stylesheet" href="../static/css/tokens.css">
+    <link rel="stylesheet" href="../static/css/main.css">
+  </head>
+
+  <body>
+    <header class="header">
+      <a href="/" class="logo" aria-label="Inetometr главная страница">
+        inet<span class="accent">ometr</span>.ru
+      </a>
+      <nav class="header-nav">
+        <a href="/admin" class="link" aria-label="Перейти к админ-панели">админ-панель</a>
+        <span class="link" id="header-info">нет данных</span>
+      </nav>
+    </header>
+
+    <main class="main" aria-busy="false">
+      <div class="card">
+        <h1 class="card__title">Скорость интернета</h1>
+        <p class="card__sub">загрузка · передача · пинг</p>
+
+        <!-- Hero metric: download speed leads -->
+        <div class="hero">
+          <div class="hero__inner">
+            <div class="hero__value" id="hero-value" aria-live="polite" data-measured="false">
+              нет данных
+            </div>
+            <div class="hero__unit" id="hero-unit">Мбит/с</div>
+          </div>
+          <div class="hero__label" id="hero-label">скорость загрузки</div>
+        </div>
+
+        <!-- Secondary metrics: upload and ping -->
+        <div class="metrics" id="metrics" aria-live="polite">
+          <div class="metric">
+            <span class="metric__value" id="metric-up" aria-label="Скорость передачи">нет данных</span>
+            <span class="metric__label">
+              <span class="direction">↑</span> Мбит/с
+            </span>
+          </div>
+          <div class="metric">
+            <span class="metric__value" id="metric-ping" aria-label="Пинг">нет данных</span>
+            <span class="metric__label">мс</span>
+          </div>
+          <div class="metric">
+            <span class="metric__value" id="metric-down" aria-label="Скорость загрузки">нет данных</span>
+            <span class="metric__label">
+              <span class="direction">↓</span> Мбит/с
+            </span>
+          </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="progress" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress__fill" id="progress-fill"></div>
+        </div>
+
+        <!-- Status (aria-live region) -->
+        <div class="status" id="status" role="status" aria-live="polite" aria-atomic="true">
+          Нажмите «Начать тест». Замеряем ваш IP и пинг сервера.
+        </div>
+
+        <div style="margin-top: var(--semantic-space-6);">
+          <button type="button" id="start-btn" class="btn" aria-describedby="status">
+            Начать тест
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      inetometr.ru · создано с любовью ·
+      <a href="/health" target="_blank" rel="noopener noreferrer">health</a>
+    </footer>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

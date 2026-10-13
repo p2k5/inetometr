@@ -1,0 +1,414 @@
+/* Inetometr — main page styles
+   Tokens: ../tokens.css
+   Mobile-first layout; wider screens layered with min-width.
+*/
+
+/* ============================================================
+   BASE RESET & TYPOGRAPHY
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--semantic-surface-page);
+  color: var(--semantic-text-primary);
+  font: var(--semantic-text-base) / var(--semantic-leading-normal) var(--semantic-font-ui);
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  line-height: var(--semantic-leading-tight);
+  font-weight: var(--semantic-weight-bold);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--semantic-space-4);
+  padding: var(--semantic-space-4) var(--semantic-space-6);
+  background: var(--semantic-surface-page);
+  border-bottom: 1px solid var(--semantic-border-default);
+}
+
+.logo {
+  font-size: var(--semantic-text-lg);
+  font-weight: var(--semantic-weight-bold);
+  letter-spacing: .5px;
+}
+
+.logo .accent {
+  color: var(--semantic-action-primary);
+}
+
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--semantic-space-4);
+}
+
+.header-nav .link {
+  color: var(--semantic-text-muted);
+  font-size: var(--semantic-text-sm);
+}
+
+/* ============================================================
+   MAIN
+   ============================================================ */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--semantic-space-6);
+  width: 100%;
+}
+
+/* ============================================================
+   CARD
+   ============================================================ */
+.card {
+  width: 100%;
+  max-width: var(--component-card-max-width);
+  background: var(--semantic-surface-card);
+  border: var(--component-card-border);
+  border-radius: var(--component-card-radius);
+  padding: var(--component-card-padding);
+  text-align: center;
+  box-shadow: var(--semantic-shadow-lg);
+}
+
+.card__title {
+  font-size: var(--semantic-text-3xl);
+  color: var(--semantic-text-primary);
+}
+
+.card__sub {
+  margin: var(--semantic-space-3) 0 var(--semantic-space-6);
+  color: var(--semantic-text-muted);
+  font-size: var(--semantic-text-sm);
+}
+
+/* ============================================================
+   HERO METRIC (the thing that leads)
+   ============================================================ */
+.hero {
+  margin: var(--semantic-space-4) 0 var(--semantic-space-8);
+}
+
+.hero__inner {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--semantic-space-2);
+}
+
+.hero__value {
+  font-size: var(--component-hero-value-size);
+  font-weight: var(--semantic-weight-bold);
+  font-family: var(--semantic-font-mono);
+  letter-spacing: -.02em;
+  line-height: 1;
+  min-height: calc(var(--component-hero-value-size) * var(--semantic-leading-tight));
+  transition: color var(--semantic-duration-fast) var(--semantic-easing-ease-out);
+}
+
+.hero__unit {
+  font-size: var(--component-hero-unit-size);
+  color: var(--semantic-text-muted);
+  font-family: var(--semantic-font-ui);
+  font-weight: var(--semantic-weight-medium);
+  line-height: 1;
+}
+
+.hero__label {
+  margin-top: var(--semantic-space-3);
+  color: var(--semantic-text-muted);
+  font-size: var(--semantic-text-sm);
+}
+
+/* Hero values get a subtle emphasis when measured */
+.hero__value[data-measured] {
+  color: var(--semantic-text-primary);
+}
+
+/* ============================================================
+   METRIC CHIPS (secondary metrics)
+   ============================================================ */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--component-metric-gap);
+  margin: var(--semantic-space-8) 0;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--semantic-space-2);
+  background: var(--semantic-surface-elevated);
+  border: var(--component-card-border);
+  border-radius: var(--component-metric-radius);
+  padding: var(--component-metric-padding);
+}
+
+.metric__value {
+  font-size: var(--component-metric-value-size);
+  font-weight: var(--semantic-weight-bold);
+  font-family: var(--semantic-font-mono);
+  letter-spacing: -.01em;
+}
+
+.metric__label {
+  color: var(--semantic-text-muted);
+  font-size: var(--semantic-text-xs);
+  text-align: center;
+}
+
+/* Direction indicators (up/down arrows) */
+.metric .direction {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--component-direction-gap);
+}
+
+/* ============================================================
+   PROGRESS BAR
+   ============================================================ */
+.progress {
+  width: 100%;
+  height: var(--component-progress-height);
+  background: var(--component-progress-bg);
+  border-radius: var(--component-progress-radius);
+  overflow: hidden;
+  margin: var(--semantic-space-6) 0 var(--semantic-space-6);
+}
+
+.progress__fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--component-progress-fill);
+  transition: width var(--semantic-duration-slow) var(--semantic-easing-ease);
+}
+
+/* ============================================================
+   STATUS (aria-live, status text)
+   ============================================================ */
+.status {
+  min-height: var(--component-status-min-height);
+  color: var(--semantic-text-muted);
+  font-size: var(--component-status-font-size);
+}
+
+.status .phase {
+  color: var(--semantic-text-primary);
+  font-weight: var(--semantic-weight-medium);
+}
+
+.status .result {
+  color: var(--semantic-feedback-success);
+  font-weight: var(--semantic-weight-semibold);
+}
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--semantic-space-2);
+  height: var(--component-btn-height);
+  padding-inline: var(--component-btn-padding-x);
+  border-radius: var(--component-btn-radius);
+  border: none;
+  background: var(--component-btn-primary-bg);
+  color: var(--component-btn-text);
+  font-size: var(--component-btn-font-size);
+  font-weight: var(--component-btn-font-weight);
+  font-family: var(--semantic-font-ui);
+  cursor: pointer;
+  transition:
+    background-color var(--semantic-duration-fast) var(--semantic-easing-ease-out),
+    transform var(--semantic-duration-fast) var(--semantic-easing-ease-out);
+}
+
+.btn:active {
+  transform: scale(.98);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--component-btn-primary-hover);
+}
+
+.btn:focus-visible {
+  outline: var(--component-btn-focus-ring) solid
+           max(var(--component-btn-focus-ring-width, 2px), 1px);
+  outline-offset: var(--component-btn-focus-offset);
+}
+
+.btn:disabled {
+  background: var(--component-btn-primary-disabled);
+  cursor: wait;
+  transform: none;
+}
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.footer {
+  padding: var(--semantic-space-4);
+  text-align: center;
+  color: var(--semantic-text-muted);
+  font-size: var(--semantic-text-xs);
+  border-top: 1px solid var(--semantic-border-default);
+}
+
+.footer a {
+  color: var(--semantic-text-muted);
+}
+
+.footer a:hover {
+  color: var(--semantic-text-primary);
+  text-decoration: underline;
+}
+
+/* ============================================================
+   SMALL SCREENS (mobile base)
+   ============================================================ */
+@media screen and (max-width: 440px) {
+  .card {
+    padding: var(--component-card-padding-sm);
+  }
+
+  .card__title {
+    font-size: var(--semantic-text-2xl);
+  }
+
+  .metrics {
+    gap: var(--semantic-space-2);
+  }
+
+  .metric {
+    padding: var(--semantic-space-3);
+  }
+
+  .metric__value {
+    font-size: var(--semantic-text-xl);
+  }
+
+  .hero__value {
+    font-size: var(--component-hero-value-min);
+    /* fallback for browsers without custom property support:
+       font-size: clamp(var(--component-hero-value-min), 22vw, var(--component-hero-value-max));
+    */
+  }
+
+  .btn {
+    width: 100%;
+  }
+}
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ============================================================
+   ADMIN PANEL
+   ============================================================ */
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--component-admin-card-min-width), 1fr));
+  gap: var(--semantic-space-4);
+  margin: var(--semantic-space-6) 0;
+}
+
+.summary .c {
+  background: var(--semantic-surface-elevated);
+  border: var(--component-card-border);
+  border-radius: var(--component-metric-radius);
+  padding: var(--component-metric-padding);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--semantic-space-2);
+}
+
+.summary .c .v {
+  font-size: var(--semantic-text-2xl);
+  font-weight: var(--semantic-weight-bold);
+  font-family: var(--semantic-font-mono);
+}
+
+.summary .c .l {
+  color: var(--semantic-text-muted);
+  font-size: var(--semantic-text-xs);
+  text-align: center;
+}
+
+.admin-table {
+  overflow-x: auto;
+}
+
+.admin-table table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--semantic-surface-elevated);
+  border-radius: var(--component-metric-radius);
+  overflow: hidden;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: var(--semantic-space-3) var(--semantic-space-4);
+  text-align: left;
+  font-size: var(--semantic-text-sm);
+  border-bottom: 1px solid var(--semantic-border-default);
+}
+
+.admin-table th {
+  background: var(--semantic-surface-hover);
+  color: var(--semantic-text-muted);
+  font-weight: var(--semantic-weight-semibold);
+}
+
+.admin-table td {
+  font-family: var(--semantic-font-mono);
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table tbody tr:hover {
+  background: var(--semantic-surface-hover);
+}

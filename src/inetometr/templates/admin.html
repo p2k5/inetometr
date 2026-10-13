@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <title>Inetometr. Панель</title>
+
+    <link rel="preload" href="../static/css/tokens.css" as="style">
+    <link rel="stylesheet" href="../static/css/tokens.css">
+    <link rel="stylesheet" href="../static/css/main.css">
+  </head>
+
+  <body>
+    <header class="header">
+      <a href="/" class="logo" aria-label="Inetometr. Главная страница">
+        inet<span class="accent">ometr</span>.ru
+      </a>
+      <nav class="header-nav">
+        <a href="/" class="link" aria-label="На главную">на главную</a>
+        <span class="link" id="header-info">нет данных</span>
+      </nav>
+    </header>
+
+    <main class="main">
+      <div class="card">
+        <h1 class="card__title">Inetometr. Панель</h1>
+        <p class="card__sub">данные замеров скорости</p>
+
+        <!-- Summary cards -->
+        <div class="summary" id="summary">
+          <!-- Filled by JavaScript -->
+        </div>
+
+        <!-- History table -->
+        <div class="admin-table">
+          <h2 class="sr-only">История измерений</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>время (UTC)</th>
+                <th>IP</th>
+                <th>↓ Мбит/с</th>
+                <th>↑ Мбит/с</th>
+                <th>пинг, мс</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      inetometr.ру · <a href="/health" target="_blank" rel="noopener noreferrer">health</a>
+    </footer>
+
+    <script type="module">
+      (async () => {
+        // Load summary data from API
+        const [statusRes, historyRes] = await Promise.all([
+          fetch('/api/status'),
+          fetch('/api/history?limit=50')
+        ]);
+        const status = await statusRes.json();
+        const history = await historyRes.json();
+
+        // Fill summary cards
+        const summaryEl = document.getElementById('summary');
+        summaryEl.innerHTML = `
+          <div class="c"><div class="v">${status.public_ip}</div><div class="l">IP сервера</div></div>
+          <div class="c"><div class="v">${status.ping_ms ?? 'нет данных'}</div><div class="l">пинг сервера, мс</div></div>
+          <div class="c"><div class="v">${(history.filter(x => x.download).map(x => x.download).reduce((x,y)=>x+y,0)/history.length|0 || 'нет данных')}</div><div class="l">средняя загрузка</div></div>
+          <div class="c"><div class="v">${(history.filter(x => x.upload).map(x => x.upload).reduce((x,y)=>x+y,0)/history.length|0 || 'нет данных')}</div><div class="l">средняя передача</div></div>
+          <div class="c"><div class="v">${(history.filter(x => x.ping).map(x => x.ping).reduce((x,y)=>x+y,0)/history.length|0 || 'нет данных')}</div><div class="l">средний пинг</div></div>
+          <div class="c"><div class="v">${history.length}</div><div class="l">измерений всего</div></div>
+        `;
+
+        // Fill table rows
+        const tbody = document.getElementById('rows');
+        tbody.innerHTML = history.slice().reverse().map(x =>
+          `<tr>
+            <td>${(x.timestamp||'').replace('T',' ').replace('Z','')}</td>
+            <td>${x.ip||'?'}</td>
+            <td>${x.download||'нет данных'}</td>
+            <td>${x.upload||'нет данных'}</td>
+            <td>${x.ping||'нет данных'}</td>
+          </tr>`).join('');
+      })();
+    </script>
+  </body>
+</html>
