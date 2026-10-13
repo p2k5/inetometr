@@ -9,7 +9,9 @@ services:
       - HOST=0.0.0.0
       - PORT=8080
       - INETOMETR_DATA=/app/data/speed_data.json
+      - INETOMETR_DB=/app/data/speed_data.db
       - INETOMETR_ADMIN_TOKEN=${INETOMETR_ADMIN_TOKEN:-change_me_please}
+      - INETOMETR_FORCE_HTTPS=false
     volumes:
       - ./data:/app/data
     restart: unless-stopped

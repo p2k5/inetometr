@@ -25,11 +25,16 @@ from collections import deque
 from pathlib import Path
 from typing import Optional
 
+from pydantic import BaseModel, Field, field_validator
+from pathlib import Path
+
 import aiohttp
-from fastapi import FastAPI, Request, Query, HTTPException, status, Depends
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from inetometr.data_store import SQLiteStore, _now_iso, build_entry, migrate_jsonLines_to_sqlite
+from fastapi import FastAPI, Request, Query, HTTPException, status, Depends, WebSocket
+from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 
@@ -41,6 +46,7 @@ except ImportError:  # ping3 требует root; без него пинг от�
 # ── константы и конфигурация ────────────────────────────────────────
 BASE_DIR = Path(__file__).parent.parent.parent  # репо
 DATA_FILE = Path(os.environ.get("INETOMETR_DATA", str(BASE_DIR / "data" / "speed_data.json")))
+DB_FILE = Path(os.environ.get("INETOMETR_DB", str(BASE_DIR / "data" / "speed_data.db")))
 HISTORY_LIMIT = 500
 
 # Лимиты для защиты от злоупотреблений
@@ -48,6 +54,10 @@ MAX_FILE_SIZE_MB = 50          # Макс. размер файла для /downl
 MAX_UPLOAD_SIZE_MB = 10        # Макс. размер загружаемого файла
 RATE_LIMIT_REQUESTS = 60       # Кол-во запросов за период (увеличено для теста скорости)
 RATE_LIMIT_WINDOW = 60         # Период в секундах
+
+# CORS настройки: белый список из env, по умолчанию "*" для разработки
+_CORS_ORIGINS_STR = os.environ.get("INETOMETR_CORS_ORIGINS", "*")
+CORS_ORIGINS = ["*"] if _CORS_ORIGINS_STR == "*" else [o.strip() for o in _CORS_ORIGINS_STR.split(",") if o.strip()]
 
 # Токен для доступа к админ-панели (по умолчанию из env, иначе требуется установить)
 ADMIN_TOKEN = os.environ.get("INETOMETR_ADMIN_TOKEN", "")
@@ -63,8 +73,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger("inetometr")
 
+# ── Pydantic модели для валидации ───────────────────────────────────
+class SpeedResult(BaseModel):
+    """Модель для валидации данных о замере скорости."""
+    download: float = Field(..., ge=0, le=10000, description="Скорость загрузки в Мбит/с")
+    upload: float = Field(..., ge=0, le=10000, description="Скорость передачи в Мбит/с")
+    ping: float = Field(..., ge=0, le=1000, description="Пинг в мс")
+    ip: Optional[str] = Field(None, pattern=r"^\d{1,3}(\.\d{1,3}){3}$", description="IP-адрес клиента")
+    timestamp: Optional[str] = None
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, v):
+        """Проверка формата timestamp."""
+        if v is not None:
+            try:
+                datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                raise ValueError("Invalid timestamp format")
+        return v
+
+
 # ── FastAPI приложение ───────────────────────────────────────────────
 from contextlib import asynccontextmanager
+from prometheus_fastapi_instrumentator import PrometheusFastApiInstrumentator
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -74,6 +106,10 @@ async def lifespan(app: FastAPI):
     logger.info("Приложение запущено, директория данных: %s", DATA_FILE.parent)
     if not ADMIN_TOKEN:
         logger.warning("INETOMETR_ADMIN_TOKEN не установлен. Админ-панель будет недоступна (503).")
+
+    # Instrument Prometheus metrics
+    PrometheusFastApiInstrumentator().instrument(app).expose(app, endpoint="/metrics")
+
     yield
     # Shutdown
     logger.info("Приложение остановлено")
@@ -84,6 +120,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# HTTPS redirect middleware for production
+@app.middleware("http")
+async def https_redirect(request: Request, call_next):
+    if os.environ.get("INETOMETR_FORCE_HTTPS", "").lower() in ("true", "1", "yes"):
+        if request.headers.get("x-forwarded-proto", "http") != "https":
+            url = request.url.replace(scheme="https")
+            return RedirectResponse(url=url, status_code=301)
+    response = await call_next(request)
+    return response
+
+# Trusted host middleware for security
+if os.environ.get("INETOMETR_ALLOWED_HOSTS"):
+    allowed_hosts = [h.strip() for h in os.environ["INETOMETR_ALLOWED_HOSTS"].split(",")]
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
+
 # ── static files & templates ─────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
@@ -91,7 +142,7 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 # CORS middleware (можно убрать в production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В production следует ограничить
+    allow_origins=CORS_ORIGINS,  # В production следует ограничить через env
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -143,7 +194,15 @@ def get_admin_token(credentials: Optional[HTTPAuthorizationCredentials] = Depend
 
 # ── утилиты ─────────────────────────────────────────────────────────
 async def _public_ip() -> str:
-    """Публичный IP-адрес хоста (через несколько бесплатных API)."""
+    """Публичный IP-адрес хоста (через несколько бесплатных API) с кэшированием."""
+    # Кэш на 5 минут (300 секунд)
+    cache_key = "public_ip"
+    now = time.time()
+    if hasattr(_public_ip, "cache") and _public_ip.cache:
+        cached_time, cached_ip = _public_ip.cache
+        if now - cached_time < 300:  # 5 минут
+            return cached_ip
+
     timeout = aiohttp.ClientTimeout(total=4)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         for url in ("https://api.ipify.org", "https://ifconfig.co", "https://ident.me"):
@@ -151,11 +210,17 @@ async def _public_ip() -> str:
                 async with session.get(url) as r:
                     ip = (await r.text()).strip()
                     if ip:
+                        # Сохраняем в кэш
+                        _public_ip.cache = (now, ip)
                         return ip
             except Exception:
                 continue
+
     try:
-        return socket.gethostbyname(socket.gethostname())
+        ip = socket.gethostbyname(socket.gethostname())
+        # Сохраняем в кэш даже если fallback
+        _public_ip.cache = (now, ip)
+        return ip
     except Exception:
         return "unknown"
 
@@ -191,27 +256,21 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _load_history() -> deque:
-    """Загрузка истории из файла speed_data.json с обработкой ошибок."""
-    h = deque(maxlen=HISTORY_LIMIT)
-    if DATA_FILE.exists():
-        try:
-            with open(DATA_FILE) as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if line:
-                        try:
-                            h.append(json.loads(line))
-                        except json.JSONDecodeError as e:
-                            logger.warning(
-                                "Skipping invalid history line %d in %s: %s",
-                                line_num, DATA_FILE, e
-                            )
-        except OSError as e:
-            logger.error("Cannot read history file %s: %s", DATA_FILE, e)
-    return h
+# ── SQLite storage ─────────────────────────────────────────────────────
+sqlite_store = SQLiteStore(DB_FILE, HISTORY_LIMIT)
+# One-time migration from JSON Lines to SQLite
+if DATA_FILE.exists():
+    migrated = migrate_jsonLines_to_sqlite(DATA_FILE, sqlite_store)
+    if migrated:
+        logger.info("Migrated %d entries from JSON Lines to SQLite", migrated)
+    # Переименовываем старый файл, чтобы не мигрировать повторно
+    try:
+        DATA_FILE.rename(DATA_FILE.with_suffix(".json.bak"))
+    except OSError:
+        pass
 
-HISTORY: deque = _load_history()
+# Инициализируем HISTORY для обратной совместимости (используем SQLite)
+HISTORY: deque = sqlite_store.load_history()
 
 
 # ── HTML-страницы ──────────────────────────────────────────────────
@@ -255,63 +314,67 @@ async def admin(request: Request, token: str = Depends(verify_admin_token)):
 # ── API ─────────────────────────────────────────────────────────────
 @app.get("/api/status")
 async def api_status(request: Request):
-    """Статус сервера + IP клиента + пинг."""
+    """Статус сервера + IP клиента + пинг с заголовками кеширования."""
     check_rate_limit(request)
-    return {
-        "public_ip": await _public_ip(),
-        "client_ip": _client_ip(request),
-        "ping_ms": _ping_ms(),
-        "os": f"{platform.system()} {platform.release()}",
-        "history_count": len(HISTORY),
-    }
+    return Response(
+        content=json.dumps({
+            "public_ip": await _public_ip(),
+            "client_ip": _client_ip(request),
+            "ping_ms": _ping_ms(),
+            "os": f"{platform.system()} {platform.release()}",
+            "history_count": len(HISTORY),
+        }),
+        media_type="application/json",
+        headers={
+            "Cache-Control": "public, max-age=30",  # Кешировать на 30 секунд
+            "Content-Type": "application/json"
+        }
+    )
 
 
 @app.get("/api/history")
 async def api_history(request: Request, limit: int = Query(20, ge=1, le=HISTORY_LIMIT)):
     """Последние N измерений."""
     check_rate_limit(request)
-    items = list(HISTORY)
+    items = list(sqlite_store.load_history())
     return items[-limit:]
 
 
 @app.post("/api/speed")
 async def api_speed(request: Request):
-    """Сохранить замер скорости."""
+    """Сохранить замер скорости с валидацией Pydantic."""
     check_rate_limit(request)
     try:
-        body = await request.json()
+        raw_body = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "bad json"}, status_code=400)
 
-    entry = {
-        "download": body.get("download"),
-        "upload": body.get("upload"),
-        "ping": body.get("ping"),
-        "ip": body.get("ip") or _client_ip(request),
-        "timestamp": body.get("timestamp") or _now_iso(),
-    }
-    # чистим: только числа, иначе None
-    for k in ("download", "upload", "ping"):
-        v = entry[k]
-        if isinstance(v, (int, float)) and v is not None:
-            try:
-                entry[k] = round(float(v), 2)
-            except (ValueError, OverflowError):
-                entry[k] = None
-        else:
-            entry[k] = None
-
-    HISTORY.append(entry)
+    # Валидация через Pydantic
     try:
-        DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(DATA_FILE, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-        logger.info("Saved speed test entry: download=%.2f, upload=%.2f, ping=%.1f",
-                   entry["download"] or 0, entry["upload"] or 0, entry["ping"] or 0)
+        data = SpeedResult(**raw_body)
     except Exception as e:
-        logger.error("Failed to save speed test entry: %s", e)
-        pass
-    return {"ok": True, "stored": len(HISTORY)}
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
+
+    entry = {
+        "download": data.download,
+        "upload": data.upload,
+        "ping": data.ping,
+        "ip": data.ip or _client_ip(request),
+        "timestamp": data.timestamp or _now_iso(),
+    }
+
+    # Сохраняем в SQLite
+    rowid = sqlite_store.append(entry)
+    # Обновляем in-memory HISTORY для обратной совместимости с тестами
+    HISTORY.append(entry)
+    # Ограничиваем размер HISTORY (хотя SQLiteStore уже ограничивает при загрузке)
+    if len(HISTORY) > HISTORY_LIMIT:
+        # Удаляем самые старые записи (слева в deque)
+        while len(HISTORY) > HISTORY_LIMIT:
+            HISTORY.popleft()
+    logger.info("Saved speed test entry: download=%.2f, upload=%.2f, ping=%.1f",
+               entry["download"] or 0, entry["upload"] or 0, entry["ping"] or 0)
+    return {"ok": True, "stored": sqlite_store.count()}
 
 
 @app.get("/download")
@@ -345,6 +408,48 @@ async def upload(request: Request):
     # Небольшая задержка для корректного замера скорости
     await asyncio.sleep(0.01)
     return {"ok": True, "bytes": len(body)}
+
+
+@app.websocket("/ws/metrics")
+async def websocket_metrics(websocket: WebSocket):
+    """WebSocket endpoint для реального времени метрик."""
+    await websocket.accept()
+    try:
+        while True:
+            # Отправляем текущие метрики каждые 5 секунд
+            data = {
+                "public_ip": await _public_ip(),
+                "history_count": sqlite_store.count(),
+                "timestamp": _now_iso(),
+            }
+            await websocket.send_json(data)
+            await asyncio.sleep(5)
+    except Exception:
+        pass
+    finally:
+        await websocket.close()
+
+
+@app.get("/api/export/csv")
+async def export_csv(request: Request, limit: int = Query(1000, ge=1, le=10000)):
+    """Экспорт истории замеров в CSV формате."""
+    check_rate_limit(request)
+    items = sqlite_store.load_history()
+    items = list(items)[-limit:]
+
+    import io
+    import csv
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["download", "upload", "ping", "ip", "timestamp"])
+    for item in items:
+        writer.writerow([item["download"], item["upload"], item["ping"], item["ip"], item["timestamp"]])
+
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=speed_history.csv"}
+    )
 
 
 @app.get("/health")

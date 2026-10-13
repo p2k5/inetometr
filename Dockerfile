@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.12-slim
 
 # Устанавливаем рабочую директорию
 WORKDIR /app
@@ -11,10 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Копируем файл зависимостей
 COPY pyproject.toml .
 
-# Устанавливаем зависимости с помощью uv
-RUN pip install --no-cache-dir uv && \
-    uv pip install --system -e . && \
-    uv pip install --system ".[dev]"
+# Устанавливаем uv
+RUN pip install --no-cache-dir uv
+
+# Устанавливаем зависимости проекта
+RUN uv pip install --system -e .
 
 # Копируем исходный код
 COPY src/ /app/src/
@@ -26,4 +27,4 @@ COPY data/ /app/data/
 EXPOSE 8080
 
 # Команда запуска
-CMD ["python", "-m", "src.inetometr.server"]
+CMD ["python", "-m", "inetometr.server"]

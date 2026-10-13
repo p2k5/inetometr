@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 # Устанавливаем временные переменные окружения для тестов
 os.environ["INETOMETR_ADMIN_TOKEN"] = "test_admin_token_123"
 
-from inetometr.server import app, HISTORY, DATA_FILE
+from inetometr.server import app, HISTORY, DATA_FILE, DB_FILE, sqlite_store
 
 import pytest
 
@@ -19,6 +19,10 @@ def setup_and_cleanup():
     HISTORY.clear()
     if DATA_FILE.exists():
         DATA_FILE.unlink()
+    # Очистка SQLite базы данных - удаляем все записи
+    with sqlite_store._lock:
+        sqlite_store._conn.execute("DELETE FROM speed_results")
+        sqlite_store._conn.commit()
 
 def test_health_endpoint():
     """Тест health endpoint"""
