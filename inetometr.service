@@ -1,0 +1,23 @@
+[Unit]
+Description=Inetometr — сервис измерения скорости интернета
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=inetometr
+Group=inetometr
+WorkingDirectory=/opt/inetometr
+EnvironmentFile=/etc/inetometr/.env
+ExecStart=/opt/inetometr/.venv/bin/python -m inetometr.server
+Restart=always
+RestartSec=10
+# Безопасность
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/inetometr/data
+ReadOnlyPaths=/opt/inetometr/src /opt/inetometr/pyproject.toml
+
+[Install]
+WantedBy=multi-user.target

@@ -8,5 +8,49 @@ wheels/
 
 # Virtual environments
 .venv
+
+# ─────────────────────────────────────────────────────────────────────
+# Secrets and sensitive configuration
+# ─────────────────────────────────────────────────────────────────────
+# Never commit .env with real secrets
+.env
+
+# ─────────────────────────────────────────────────────────────────────
+# Data files (SQLite DB, JSON history, backups)
+# ─────────────────────────────────────────────────────────────────────
+# SQLite database (contains measurement history)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+# JSON Lines history file
+data/speed_data.json
+# Migration backup of JSON Lines
+data/*.json.bak
+# Runtime server logs
+*.log
+server.log
+
+# ─────────────────────────────────────────────────────────────────────
+# Caches and local artifacts
+# ─────────────────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ─────────────────────────────────────────────────────────────────────
+# IDE and editor files
+# ─────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ─────────────────────────────────────────────────────────────────────
+# Local-only instruction files (not part of the project)
+# ─────────────────────────────────────────────────────────────────────
 CLAUDE.md
 AGENTS.md

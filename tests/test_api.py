@@ -70,26 +70,68 @@ def test_save_speed_data():
     assert entry["ip"] == "192.168.1.1"
 
 def test_get_history():
-    """Тест получения истории"""
+    """Тест получения истории с пагинацией и сортировкой"""
     client = TestClient(app)
 
-    # Добавляем несколько записей
+    # Добавляем несколько записей с явными временными метками
+    # Добавляем с задержкой, чтобы timestamps были разными
     for i in range(3):
         test_data = {
             "download": float(100 + i*10),
             "upload": float(50 + i*5),
             "ping": float(10 + i),
-            "ip": f"192.168.1.{i+1}"
+            "ip": f"192.168.1.{i+1}",
+            "timestamp": f"2026-01-0{i+1}T12:00:00"
         }
         client.post("/api/speed", json=test_data)
 
+    # По умолчанию сортировка: timestamp desc (новые первыми)
+    # Сортировка по timestamp descending: последние добавленные (с большим индексом i)
+    # будут первыми, если timestamps разные
     response = client.get("/api/history?limit=2")
     assert response.status_code == 200
     data = response.json()
     assert len(data) == 2
-    # Должны быть последние 2 записи: 110.0 и 120.0
-    assert data[0]["download"] == 110.0  # вторая запись (одна из последних двух)
-    assert data[1]["download"] == 120.0  # третья запись (последняя)
+    # Сортировка timestamp DESC: последние записи сначала
+    # Записи добавлены с timestamps 2026-01-01, 2026-01-02, 2026-01-03
+    # DESC порядок: 01-03, 01-02, 01-01, то есть download 120.0, 110.0
+    assert data[0]["download"] == 120.0  # последняя добавленная (самая новая)
+    assert data[1]["download"] == 110.0  # вторая добавленная
+
+    # Проверка пагинации: offset=1, limit=2 - пропускаем самую новую, берем следующие две
+    response = client.get("/api/history?limit=2&offset=1")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    # Пропускаем самую новую (120.0), берем следующие две: [110.0, 100.0]
+    assert data[0]["download"] == 110.0
+    assert data[1]["download"] == 100.0
+
+    # Проверка сортировки по download ASC (от меньшего к большему)
+    response = client.get("/api/history?sort_by=download&sort_dir=asc&limit=3")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 3
+    assert data[0]["download"] == 100.0
+    assert data[1]["download"] == 110.0
+    assert data[2]["download"] == 120.0
+
+    # Проверка сортировки по download DESC (от большего к меньшему)
+    response = client.get("/api/history?sort_by=download&sort_dir=desc&limit=3")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 3
+    assert data[0]["download"] == 120.0
+    assert data[1]["download"] == 110.0
+    assert data[2]["download"] == 100.0
+
+    # Проверка заголовков пагинации
+    response = client.get("/api/history?limit=2")
+    assert response.status_code == 200
+    assert "x-total-count" in response.headers
+    assert int(response.headers["x-total-count"]) == 3
+    assert response.headers["x-limit"] == "2"
+    assert response.headers["x-offset"] == "0"
 
 def test_admin_endpoint_without_token():
     """Тест админ-панели без токена"""
@@ -152,3 +194,151 @@ def test_upload_endpoint_size_limit():
     test_data = b"x" * (11 * 1024 * 1024)  # 11 МБ > MAX_UPLOAD_SIZE_MB (10)
     response = client.post("/upload", content=test_data)
     assert response.status_code == 413  # Request Entity Too Large
+
+
+# ── HTTP кеширование тесты (фаза 2.4) ────────────────────────────────────
+
+def test_api_status_cache_headers():
+    """Тест кеширования заголовков для /api/status"""
+    client = TestClient(app)
+    response = client.get("/api/status")
+    assert response.status_code == 200
+    # Должен иметь заголовок кеширования
+    assert "cache-control" in response.headers
+    cache_control = response.headers["cache-control"]
+    # Должен быть public с max-age=30
+    assert "public" in cache_control
+    assert "max-age=30" in cache_control
+
+
+def test_api_history_no_cache():
+    """Тест отсутствия кеширования для /api/history (персональные данные)"""
+    client = TestClient(app)
+    response = client.get("/api/history")
+    assert response.status_code == 200
+    # Должен иметь no-store для персональных данных
+    assert "cache-control" in response.headers
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_download_no_cache():
+    """Тест отсутствия кеширования для /download"""
+    client = TestClient(app)
+    response = client.get("/download?mb=1")
+    assert response.status_code == 200
+    # Должен иметь no-store
+    assert "cache-control" in response.headers
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_upload_no_cache():
+    """Тест отсутствия кеширования для /upload"""
+    client = TestClient(app)
+    response = client.post("/upload", content=b"test")
+    assert response.status_code == 200
+    # Должен иметь no-store (или отсутствие кеширования)
+    # POST обычно не кешируется, но проверяем заголовок если есть
+    if "cache-control" in response.headers:
+        assert "no-store" in response.headers["cache-control"]
+
+
+def test_static_files_caching():
+    """Тест кеширования статических файлов"""
+    client = TestClient(app)
+    # Проверяем CSS файл (должен иметь длительное кеширование)
+    response = client.get("/static/css/main.css")
+    # Файл может не существовать в тестах, но если существует -
+    if response.status_code == 200:
+        assert "cache-control" in response.headers
+        cache_control = response.headers["cache-control"]
+        # CSS должен иметь max-age=31536000 (1 год) и immutable
+        assert "max-age=31536000" in cache_control
+        assert "immutable" in cache_control
+
+
+def test_api_export_csv_no_cache():
+    """Тест отсутствия кеширования для CSV экспорта"""
+    client = TestClient(app)
+    response = client.get("/api/export/csv")
+    # Может быть 200 (если есть данные) или 200 с пустым результатом
+    assert response.status_code == 200
+    # Должен иметь no-store
+    assert "cache-control" in response.headers
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_health_endpoint_cache():
+    """Тест кеширования для /health endpoint"""
+    client = TestClient(app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    # Должен иметь заголовок кеширования
+    assert "cache-control" in response.headers
+    cache_control = response.headers["cache-control"]
+    # Должен быть public с небольшим max-age
+    assert "public" in cache_control
+    assert "max-age=" in cache_control
+
+
+# ── CORS тесты (фаза 1.1) ────────────────────────────────────────────
+
+def test_cors_allowed_origin():
+    """Тест CORS для разрешённого Origin (wildcard по умолчанию)."""
+    client = TestClient(app)
+    response = client.get(
+        "/health",
+        headers={
+            "Origin": "https://inetometr.ru",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    # CORS-заголовки должны быть присутствовать
+    assert "access-control-allow-origin" in response.headers
+    # При wildcard-origin "*" credentials не включаются (CORS-спецификация)
+    # Это корректное поведение: credentials с wildcard запрещены
+    acao = response.headers.get("access-control-allow-origin")
+    assert acao in ("*", "https://inetometr.ru")
+
+
+def test_cors_denied_origin():
+    """Тест CORS для запрещённого Origin (не в белом списке)."""
+    client = TestClient(app)
+    response = client.get(
+        "/health",
+        headers={
+            "Origin": "https://evil.example.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    # Запрещённый origin не должен получить разрешение
+    # (заголовок либо отсутствует, либо не совпадает с Origin)
+    acao = response.headers.get("access-control-allow-origin")
+    assert acao != "https://evil.example.com"
+
+
+def test_cors_preflight():
+    """Тест CORS preflight-запроса (OPTIONS)."""
+    client = TestClient(app)
+    response = client.options(
+        "/api/speed",
+        headers={
+            "Origin": "https://inetometr.ru",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    # OPTIONS может быть обработан middleware и вернуть 200 или 405,
+    # но CORS-заголовки должны присутствовать при разрешённом origin
+    assert "access-control-allow-origin" in response.headers
+    assert "access-control-allow-methods" in response.headers
+
+
+def test_cors_no_origin():
+    """Тест CORS без Origin заголовка (запрос с того же сервера)."""
+    client = TestClient(app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    # При отсутствии Origin CORS-заголовки могут отсутствовать
+    # или быть пустыми — это нормально

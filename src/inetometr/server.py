@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field, field_validator
 from pathlib import Path
 
 import aiohttp
+from starlette.types import Scope
 from inetometr.data_store import SQLiteStore, _now_iso, build_entry, migrate_jsonLines_to_sqlite
 from fastapi import FastAPI, Request, Query, HTTPException, status, Depends, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResponse
@@ -58,6 +59,8 @@ RATE_LIMIT_WINDOW = 60         # Период в секундах
 # CORS настройки: белый список из env, по умолчанию "*" для разработки
 _CORS_ORIGINS_STR = os.environ.get("INETOMETR_CORS_ORIGINS", "*")
 CORS_ORIGINS = ["*"] if _CORS_ORIGINS_STR == "*" else [o.strip() for o in _CORS_ORIGINS_STR.split(",") if o.strip()]
+# При использовании wildcard-origin "*" credentials должны быть отключены (CORS-спецификация)
+ALLOW_CREDENTIALS = True if CORS_ORIGINS != ["*"] else False
 
 # Токен для доступа к админ-панели (по умолчанию из env, иначе требуется установить)
 ADMIN_TOKEN = os.environ.get("INETOMETR_ADMIN_TOKEN", "")
@@ -107,9 +110,6 @@ async def lifespan(app: FastAPI):
     if not ADMIN_TOKEN:
         logger.warning("INETOMETR_ADMIN_TOKEN не установлен. Админ-панель будет недоступна (503).")
 
-    # Instrument Prometheus metrics
-    PrometheusFastApiInstrumentator().instrument(app).expose(app, endpoint="/metrics")
-
     yield
     # Shutdown
     logger.info("Приложение остановлено")
@@ -119,6 +119,9 @@ app = FastAPI(
     description="Измерение скорости интернета",
     lifespan=lifespan,
 )
+
+# Instrument Prometheus metrics (must be done at module level, before middleware)
+PrometheusFastApiInstrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 # HTTPS redirect middleware for production
 @app.middleware("http")
@@ -135,15 +138,34 @@ if os.environ.get("INETOMETR_ALLOWED_HOSTS"):
     allowed_hosts = [h.strip() for h in os.environ["INETOMETR_ALLOWED_HOSTS"].split(",")]
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
+# ── статические файлы с кешированием ─────────────────────────────────────
+class CacheControlStaticFiles(StaticFiles):
+    """Статические файлы с различными политиками кеширования."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        """Переопределяем метод для добавления заголовков кеширования."""
+        response = await super().get_response(path, scope)
+        # Добавляем заголовки кеширования в зависимости от типа файла
+        path_str = str(path).lower()
+        if path_str.endswith('.css'):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path_str.endswith('.js'):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif path_str.endswith(('.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg')):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=86400"
+        return response
+
 # ── static files & templates ─────────────────────────────────────────
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", CacheControlStaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 # CORS middleware (можно убрать в production)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,  # В production следует ограничить через env
-    allow_credentials=True,
+    allow_credentials=ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -333,11 +355,24 @@ async def api_status(request: Request):
 
 
 @app.get("/api/history")
-async def api_history(request: Request, limit: int = Query(20, ge=1, le=HISTORY_LIMIT)):
-    """Последние N измерений."""
+async def api_history(
+    request: Request,
+    limit: int = Query(20, ge=1, le=HISTORY_LIMIT),
+    offset: int = Query(0, ge=0),
+    sort_by: str = Query("timestamp", pattern="^(timestamp|download|upload|ping)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+):
+    """Последние N измерений с пагинацией и сортировкой."""
     check_rate_limit(request)
-    items = list(sqlite_store.load_history())
-    return items[-limit:]
+    items, total = sqlite_store.load_history_paginated(
+        limit=limit, offset=offset, sort_by=sort_by, sort_dir=sort_dir.upper()
+    )
+    response = JSONResponse(list(items))
+    response.headers["x-total-count"] = str(total)
+    response.headers["x-limit"] = str(limit)
+    response.headers["x-offset"] = str(offset)
+    response.headers["cache-control"] = "no-store"
+    return response
 
 
 @app.post("/api/speed")
@@ -416,9 +451,15 @@ async def websocket_metrics(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            # Отправляем текущие метрики каждые 5 секунд
+            # Получаем последнее измерение из истории
+            items = list(sqlite_store.load_history())
+            latest = items[-1] if items else None
             data = {
-                "public_ip": await _public_ip(),
+                "latest": {
+                    "download": latest["download"] if latest else 0,
+                    "upload": latest["upload"] if latest else 0,
+                    "ping": latest["ping"] if latest else 0,
+                },
                 "history_count": sqlite_store.count(),
                 "timestamp": _now_iso(),
             }
@@ -448,14 +489,18 @@ async def export_csv(request: Request, limit: int = Query(1000, ge=1, le=10000))
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=speed_history.csv"}
+        headers={"Content-Disposition": "attachment; filename=speed_history.csv", "Cache-Control": "no-store"}
     )
 
 
 @app.get("/health")
 async def health():
     """Проверка живости для мониторинга."""
-    return {"ok": True, "time": _now_iso()}
+    return Response(
+        content=json.dumps({"ok": True, "time": _now_iso()}),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=5"}
+    )
 
 
 # ── запуск ─────────────────────────────────────────────────────────

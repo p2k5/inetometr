@@ -10,9 +10,8 @@ import logging
 import sqlite3
 import threading
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("inetometr.data_store")
 
@@ -43,7 +42,7 @@ class SQLiteStore:
         self.db_path = Path(db_path)
         self.history_limit = history_limit
         self._lock = threading.Lock()
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._connect()
         self._init_db()
 
@@ -113,6 +112,72 @@ class SQLiteStore:
                 logger.error("SQLite read error: %s", e)
         return h
 
+    def load_history_paginated(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        sort_by: str = "timestamp",
+        sort_dir: str = "DESC",
+    ) -> tuple[deque, int]:
+        """Загружает историю с пагинацией, сортировкой и фильтрацией.
+
+        Args:
+            limit: Максимальное количество записей (1 - 500)
+            offset: Смещение (сколько записей пропустить в начале)
+            sort_by: Поле для сортировки ("timestamp", "download", "upload", "ping")
+            sort_dir: Направление сортировки ("ASC" или "DESC")
+
+        Returns:
+            Tuple (deque of records, total count of matching records)
+        """
+        # Валидация лимита
+        limit = max(1, min(limit, self.history_limit))
+
+        # Базовый запрос с сортировкой
+        valid_sort_fields = {"timestamp", "download", "upload", "ping"}
+        if sort_by not in valid_sort_fields:
+            sort_by = "timestamp"
+
+        sort_dir = sort_dir.upper()
+        if sort_dir not in ("ASC", "DESC"):
+            sort_dir = "DESC"
+
+        # Считаем общее количество записей
+        count_cur = self._conn.execute("SELECT COUNT(*) FROM speed_results")
+        total_count = count_cur.fetchone()[0]
+
+        # Строим запрос с пагинацией и сортировкой
+        # offset применяется после сортировки (то есть мы пропускаем N записей сверху)
+        query = f'''
+            SELECT download, upload, ping, ip, timestamp
+            FROM speed_results
+            ORDER BY {sort_by} {sort_dir}
+            LIMIT ? OFFSET ?
+        '''
+
+        h: deque = deque(maxlen=limit)
+        with self._lock:
+            assert self._conn is not None
+            try:
+                cur = self._conn.execute(query, (limit, offset))
+                for row in cur.fetchall():
+                    h.append(
+                        {
+                            "download": row["download"],
+                            "upload": row["upload"],
+                            "ping": row["ping"],
+                            "ip": row["ip"],
+                            "timestamp": row["timestamp"],
+                        }
+                    )
+                # SQL запрос уже возвращает результаты в правильном порядке благодаря ORDER BY
+                # Никакого реверса не нужен - результаты уже отсортированы как запрошено
+            except sqlite3.Error as e:
+                logger.error("SQLite read error during pagination: %s", e)
+                h = deque(maxlen=limit)
+
+        return h, total_count
+
     def count(self) -> int:
         """Возвращает количество записей в SQLite."""
         with self._lock:
@@ -154,11 +219,11 @@ def migrate_jsonLines_to_sqlite(json_path: Path, store: SQLiteStore) -> int:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def build_entry(download: float, upload: float, ping: float, ip: str,
-                timestamp: Optional[str] = None) -> dict:
+                timestamp: str | None = None) -> dict:
     """Создаёт словарь-запись с текущей меткой времени."""
     return {
         "download": download,

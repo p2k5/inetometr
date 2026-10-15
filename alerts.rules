@@ -1,0 +1,52 @@
+groups:
+  - name: inetometr_alerts
+    rules:
+      # Сервис недоступен более 1 минуты
+      - alert: InetometrDown
+        expr: up{job="inetometr"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Сервис Inetometr недоступен"
+          description: "Эндпоинт /health не отвечает более 1 минуты на инстансе {{ $labels.instance }}"
+
+      # Сервер отвечает медленно более 2 минут (суммарная задержка запросов > 1 сек)
+      - alert: InetometrSlowResponse
+        expr: avg(rate(http_request_duration_seconds_sum[5m])) / avg(rate(http_request_duration_seconds_count[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Медленные ответы от Inetometr"
+          description: "Среднее время ответа превышает 1 секунду в течение 2 минут"
+
+      # Количество ошибок 5xx растёт
+      - alert: InetometrHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокий уровень ошибок 5xx в Inetometr"
+          description: "Частота ошибок 5xx превышает 0.1 запросов в секунду"
+
+      # Нет новых измерений скорости более 1 часа
+      - alert: InetometrNoNewMeasurements
+        expr: time() - max(inetometr_speed_measurements_timestamp) > 3600
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Нет новых замеров скорости"
+          description: "Новых измерений скорости не поступало более 1 часа"
+
+      # Высокий отказ при запросах к публичному IP (если метрика доступна)
+      - alert: InetometrPublicIPFetchFailing
+        expr: rate(inetometr_public_ip_fetch_errors_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ошибки получения публичного IP"
+          description: "Запросы к внешнему API публичного IP завершаются с ошибкой"

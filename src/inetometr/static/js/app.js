@@ -4,6 +4,67 @@
 const $ = (id) => document.getElementById(id);
 const setVal = (id, v) => { $(id).textContent = v; };
 
+// ----- WebSocket metrics -------------------------------------------------
+
+let ws = null;
+let wsReconnectTimer = null;
+let wsReconnectDelay = 1000; // начальная задержка 1с
+const WS_MAX_RECONNECT_DELAY = 30000; // максимум 30с
+
+function connectWebSocket() {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${window.location.host}/ws/metrics`;
+
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    console.log('[ws] connected');
+    wsReconnectDelay = 1000; // сброс задержки при успешном соединении
+    clearWsReconnect();
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.latest) {
+        setVal('metric-down', Math.round(data.latest.download * 10) / 10);
+        setVal('metric-up', Math.round(data.latest.upload * 10) / 10);
+        setVal('metric-ping', Math.round(data.latest.ping * 10) / 10);
+        setHeroValue(Math.round(data.latest.download * 10) / 10);
+      }
+    } catch (e) {
+      console.debug('[ws] parse error:', e);
+    }
+  };
+
+  ws.onclose = (event) => {
+    console.log('[ws] closed', event.code, event.reason);
+    scheduleWsReconnect();
+  };
+
+  ws.onerror = (err) => {
+    console.debug('[ws] error:', err);
+    // onclose всё равно вызовется, reconnect обработается там
+  };
+}
+
+function clearWsReconnect() {
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+}
+
+function scheduleWsReconnect() {
+  clearWsReconnect();
+  wsReconnectTimer = setTimeout(() => {
+    console.log(`[ws] reconnecting in ${wsReconnectDelay}ms...`);
+    connectWebSocket();
+  }, wsReconnectDelay);
+  // экспоненциальный рост задержки с ограничением максимума
+  wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_RECONNECT_DELAY);
+}
+
 // ----- Helpers -----------------------------------------------------------
 
 function setStatus(text, opts = {}) {
@@ -174,4 +235,14 @@ startBtn.addEventListener('click', runTest);
   } catch (e) {
     $('header-info').textContent = 'IP: недоступен | пинг сервера: недоступен';
   }
+  // Подключаемся к WebSocket после успешного API-запроса
+  connectWebSocket();
 })();
+
+// Очистка при закрытии окна
+window.addEventListener('beforeunload', () => {
+  if (ws) {
+    ws.close();
+  }
+  clearWsReconnect();
+});
