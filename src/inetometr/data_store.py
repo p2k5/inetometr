@@ -24,9 +24,22 @@ CREATE TABLE IF NOT EXISTS speed_results (
     download    REAL NOT NULL,
     upload      REAL NOT NULL,
     ping        REAL NOT NULL,
+    jitter      REAL DEFAULT NULL,
+    https_latency REAL DEFAULT NULL,
     ip          TEXT NOT NULL,
     timestamp   TEXT NOT NULL
 )
+"""
+
+# Индексы для ускорения сортировки и фильтрации
+INDEX_SQL_DOWNLOAD = "CREATE INDEX IF NOT EXISTS idx_speed_results_download ON speed_results(download)"
+INDEX_SQL_UPLOAD = "CREATE INDEX IF NOT EXISTS idx_speed_results_upload ON speed_results(upload)"
+INDEX_SQL_PING = "CREATE INDEX IF NOT EXISTS idx_speed_results_ping ON speed_results(ping)"
+INDEX_SQL_JITTER = "CREATE INDEX IF NOT EXISTS idx_speed_results_jitter ON speed_results(jitter)"
+INDEX_SQL_HTTPS_LATENCY = "CREATE INDEX IF NOT EXISTS idx_speed_results_https_latency ON speed_results(https_latency)"
+INDEX_SQL_TIMESTAMP = """
+CREATE INDEX IF NOT EXISTS idx_speed_results_timestamp
+ON speed_results(timestamp DESC)
 """
 
 CREATE_INDEX_SQL = """
@@ -60,11 +73,41 @@ class SQLiteStore:
         self._conn.row_factory = sqlite3.Row
 
     def _init_db(self) -> None:
-        """Создаёт таблицы и индексы при первом запуске."""
+        """Создаёт таблицы и индексы при первом запуске, а также мигрирует существующую схему."""
         with self._lock:
             assert self._conn is not None
             self._conn.execute(CREATE_TABLE_SQL)
-            self._conn.execute(CREATE_INDEX_SQL)
+            # Миграция существующей схемы ДО создания индексов
+            self._migrate_schema()
+            self._conn.execute(INDEX_SQL_DOWNLOAD)
+            self._conn.execute(INDEX_SQL_UPLOAD)
+            self._conn.execute(INDEX_SQL_PING)
+            self._conn.execute(INDEX_SQL_JITTER)
+            self._conn.execute(INDEX_SQL_HTTPS_LATENCY)
+            self._conn.execute(INDEX_SQL_TIMESTAMP)
+            self._conn.commit()
+
+    def _migrate_schema(self) -> None:
+        """Добавляет новые колонки в существующие таблицы, если их ещё нет."""
+        assert self._conn is not None
+        cur = self._conn.execute("PRAGMA table_info(speed_results)")
+        columns = {row[1] for row in cur.fetchall()}
+
+        migrations = [
+            ("jitter", "REAL DEFAULT NULL"),
+            ("https_latency", "REAL DEFAULT NULL"),
+        ]
+
+        for col_name, col_type in migrations:
+            if col_name not in columns:
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE speed_results ADD COLUMN {col_name} {col_type}"
+                    )
+                    logger.info("Migrated DB: added column %s %s", col_name, col_type)
+                except sqlite3.Error as e:
+                    logger.error("Failed to add column %s: %s", col_name, e)
+        if any(col_name not in columns for col_name, _ in migrations):
             self._conn.commit()
 
     def append(self, entry: dict) -> int:
@@ -72,12 +115,14 @@ class SQLiteStore:
         with self._lock:
             assert self._conn is not None
             cur = self._conn.execute(
-                "INSERT INTO speed_results (download, upload, ping, ip, timestamp) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO speed_results (download, upload, ping, jitter, https_latency, ip, timestamp) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     entry["download"],
                     entry["upload"],
                     entry["ping"],
+                    entry.get("jitter"),
+                    entry.get("https_latency"),
                     entry["ip"],
                     entry["timestamp"],
                 ),
@@ -92,7 +137,7 @@ class SQLiteStore:
             assert self._conn is not None
             try:
                 cur = self._conn.execute(
-                    "SELECT download, upload, ping, ip, timestamp "
+                    "SELECT download, upload, ping, jitter, https_latency, ip, timestamp "
                     "FROM speed_results ORDER BY id DESC LIMIT ?",
                     (self.history_limit,),
                 )
@@ -102,6 +147,8 @@ class SQLiteStore:
                             "download": row["download"],
                             "upload": row["upload"],
                             "ping": row["ping"],
+                            "jitter": row["jitter"],
+                            "https_latency": row["https_latency"],
                             "ip": row["ip"],
                             "timestamp": row["timestamp"],
                         }
@@ -118,6 +165,8 @@ class SQLiteStore:
         offset: int = 0,
         sort_by: str = "timestamp",
         sort_dir: str = "DESC",
+        start_time: str | None = None,
+        end_time: str | None = None,
     ) -> tuple[deque, int]:
         """Загружает историю с пагинацией, сортировкой и фильтрацией.
 
@@ -126,6 +175,8 @@ class SQLiteStore:
             offset: Смещение (сколько записей пропустить в начале)
             sort_by: Поле для сортировки ("timestamp", "download", "upload", "ping")
             sort_dir: Направление сортировки ("ASC" или "DESC")
+            start_time: Начальная временная метка (ISO format, включительно)
+            end_time: Конечная временная метка (ISO format, включительно)
 
         Returns:
             Tuple (deque of records, total count of matching records)
@@ -142,30 +193,54 @@ class SQLiteStore:
         if sort_dir not in ("ASC", "DESC"):
             sort_dir = "DESC"
 
-        # Считаем общее количество записей
-        count_cur = self._conn.execute("SELECT COUNT(*) FROM speed_results")
+        # Строим условия фильтрации по времени
+        time_conditions = []
+        params = []
+
+        if start_time is not None:
+            time_conditions.append("timestamp >= ?")
+            params.append(start_time)
+
+        if end_time is not None:
+            time_conditions.append("timestamp <= ?")
+            params.append(end_time)
+
+        # Считаем общее количество записей с учетом фильтрации
+        count_query = "SELECT COUNT(*) FROM speed_results"
+        if time_conditions:
+            count_query += " WHERE " + " AND ".join(time_conditions)
+
+        count_cur = self._conn.execute(count_query, tuple(params) if params else ())
         total_count = count_cur.fetchone()[0]
 
-        # Строим запрос с пагинацией и сортировкой
+        # Строим основной запрос с пагинацией, сортировкой и фильтрацией
         # offset применяется после сортировки (то есть мы пропускаем N записей сверху)
-        query = f'''
-            SELECT download, upload, ping, ip, timestamp
+        select_query = '''
+            SELECT download, upload, ping, jitter, https_latency, ip, timestamp
             FROM speed_results
+        '''
+        if time_conditions:
+            select_query += " WHERE " + " AND ".join(time_conditions)
+
+        select_query += f'''
             ORDER BY {sort_by} {sort_dir}
             LIMIT ? OFFSET ?
         '''
+        final_params = tuple(params) + (limit, offset) if params else (limit, offset)
 
         h: deque = deque(maxlen=limit)
         with self._lock:
             assert self._conn is not None
             try:
-                cur = self._conn.execute(query, (limit, offset))
+                cur = self._conn.execute(select_query, final_params)
                 for row in cur.fetchall():
                     h.append(
                         {
                             "download": row["download"],
                             "upload": row["upload"],
                             "ping": row["ping"],
+                            "jitter": row["jitter"],
+                            "https_latency": row["https_latency"],
                             "ip": row["ip"],
                             "timestamp": row["timestamp"],
                         }
@@ -184,6 +259,17 @@ class SQLiteStore:
             assert self._conn is not None
             cur = self._conn.execute("SELECT COUNT(*) FROM speed_results")
             return cur.fetchone()[0]
+
+    def ping(self) -> bool:
+        """Проверяет доступность SQLite базы данных."""
+        try:
+            with self._lock:
+                assert self._conn is not None
+                self._conn.execute("SELECT 1").fetchone()
+            return True
+        except sqlite3.Error as e:
+            logger.error("SQLite ping failed: %s", e)
+            return False
 
     def close(self) -> None:
         """Закрывает соединение с SQLite."""

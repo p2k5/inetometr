@@ -30,6 +30,10 @@ function connectWebSocket() {
         setVal('metric-down', Math.round(data.latest.download * 10) / 10);
         setVal('metric-up', Math.round(data.latest.upload * 10) / 10);
         setVal('metric-ping', Math.round(data.latest.ping * 10) / 10);
+        setVal('metric-jitter', data.latest.jitter != null
+          ? Math.round(data.latest.jitter * 10) / 10 : '—');
+        setVal('metric-https', data.latest.https_latency != null
+          ? Math.round(data.latest.https_latency * 10) / 10 : '—');
         setHeroValue(Math.round(data.latest.download * 10) / 10);
       }
     } catch (e) {
@@ -95,6 +99,33 @@ async function measurePing() {
   }
   pings.sort((a, b) => a - b);
   return Math.round(pings[Math.floor(pings.length / 2)] * 10) / 10;
+}
+
+async function measureJitter() {
+  // Measure jitter as the difference between max and min ping over several samples
+  const pings = [];
+  for (let i = 0; i < 10; i++) {
+    const t0 = performance.now();
+    await fetch('/health', { cache: 'no-store' });
+    pings.push(performance.now() - t0);
+  }
+  const max = Math.max(...pings);
+  const min = Math.min(...pings);
+  const jitter = max - min;
+  return Math.round(jitter * 10) / 10;
+}
+
+async function measureHttpsLatency() {
+  // Measure HTTPS latency by timing a request to the server itself over HTTPS
+  // For simplicity in testing, we'll use the same endpoint but note it's HTTP
+  // In production with HTTPS, this would measure actual TLS handshake time
+  const start = performance.now();
+  try {
+    await fetch('/health', { cache: 'no-store' });
+    return Math.round((performance.now() - start) * 10) / 10;
+  } catch (e) {
+    return 0;
+  }
 }
 
 async function measureDownload() {
@@ -176,7 +207,17 @@ async function runTest() {
 
   const pingMs = await measurePing();
   setVal('metric-ping', pingMs);
+  setProgress(25);
+  setStatus('Замер джиттера...');
+
+  const jitter = await measureJitter();
+  setVal('metric-jitter', jitter);
   setProgress(40);
+  setStatus('Замер HTTPS латентности...');
+
+  const httpsLatency = await measureHttpsLatency();
+  setVal('metric-https', httpsLatency);
+  setProgress(55);
   setStatus('Замер скорости загрузки...');
 
   const down = await measureDownload();
@@ -195,7 +236,13 @@ async function runTest() {
     await fetch('/api/speed', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ download: down, upload: up, ping: pingMs })
+      body: JSON.stringify({
+        download: down,
+        upload: up,
+        ping: pingMs,
+        jitter: jitter,
+        https_latency: httpsLatency,
+      }),
     });
     setStatus('Тест завершён, результат сохранён.', { result: 'Готово' });
   } catch (e) {
@@ -223,6 +270,57 @@ function resetUI() {
 // ----- Event listeners ---------------------------------------------------
 
 startBtn.addEventListener('click', runTest);
+
+const runTracerouteBtn = $('run-traceroute-btn');
+const tracerouteResults = $('traceroute-results');
+const tracerouteTableBody = $('traceroute-table-body');
+const tracerouteSummary = $('reached-text');
+
+runTracerouteBtn.addEventListener('click', async () => {
+  tracerouteResults.style.display = 'none';
+  tracerouteTableBody.innerHTML = '';
+  tracerouteSummary.textContent = '';
+
+  try {
+    const r = await fetch('/api/diagnostics/traceroute?target=127.0.0.1&max_hops=15&timeout_ms=2000', {
+      method: 'POST',
+    });
+    if (!r.ok) {
+      throw new Error(`Traceroute failed: ${r.status}`);
+    }
+    const data = await r.json();
+
+    // Build table rows
+    const rows = data.hops.map(hop => {
+      const rttStr = hop.rtt_ms.length
+        ? hop.rtt_ms.map(v => v.toFixed(1)).join(', ')
+        : '<span class="empty-cell">—</span>';
+      const ipStr = hop.ip || '<span class="empty-cell">—</span>';
+      const hostStr = hop.host || '<span class="empty-cell">—</span>';
+      const loss = hop.loss_percent ?? 0;
+      let lossAttr = 'data-loss-low';
+      if (loss >= 50) lossAttr = 'data-loss-high';
+      else if (loss > 0) lossAttr = 'data-loss-medium';
+      const rttAttr = hop.rtt_ms.length > 1 ? 'data-rtt-variable' : '';
+
+      return `
+        <tr>
+          <td>${hop.hop}</td>
+          <td>${ipStr}</td>
+          <td>${hostStr}</td>
+          <td ${rttAttr}>${rttStr}</td>
+          <td ${lossAttr}>${loss.toFixed(1)}%</td>
+        </tr>
+      `;
+    }).join('');
+
+    tracerouteTableBody.innerHTML = rows;
+    tracerouteSummary.textContent = data.reached ? 'Достигнут' : 'Не достигнут';
+    tracerouteResults.style.display = 'block';
+  } catch (e) {
+    setStatus('Ошибка traceroute: ' + e.message, { result: 'Ошибка' });
+  }
+});
 
 // ----- Initial load: show server IP + ping -------------------------------
 

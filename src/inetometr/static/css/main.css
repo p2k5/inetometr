@@ -412,3 +412,65 @@ a {
 .admin-table tbody tr:hover {
   background: var(--semantic-surface-hover);
 }
+
+/* TRACEROUTE TABLE */
+.traceroute-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--semantic-surface-elevated);
+  border-radius: var(--component-metric-radius);
+  overflow: hidden;
+}
+
+.traceroute-table th,
+.traceroute-table td {
+  padding: var(--semantic-space-3) var(--semantic-space-4);
+  text-align: left;
+  font-size: var(--semantic-text-sm);
+  border-bottom: 1px solid var(--semantic-border-default);
+}
+
+.traceroute-table th {
+  background: var(--semantic-surface-hover);
+  color: var(--semantic-text-muted);
+  font-weight: var(--semantic-weight-semibold);
+}
+
+.traceroute-table td {
+  font-family: var(--semantic-font-mono);
+}
+
+.traceroute-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.traceroute-table tbody tr:hover {
+  background: var(--semantic-surface-hover);
+}
+
+/* Loss percent styling */
+.traceroute-table td[data-loss-high] {
+  color: var(--semantic-feedback-error);
+  font-weight: var(--semantic-weight-semibold);
+}
+
+.traceroute-table td[data-loss-medium] {
+  color: var(--semantic-feedback-warning);
+  font-weight: var(--semantic-weight-medium);
+}
+
+.traceroute-table td[data-loss-low] {
+  color: var(--semantic-feedback-success);
+  font-weight: var(--semantic-weight-medium);
+}
+
+/* RTT styling - highlight variations */
+.traceroute-table td[data-rtt-variable] {
+  font-family: var(--semantic-font-mono);
+}
+
+/* Empty cell styling */
+.traceroute-table td.empty-cell {
+  color: var(--semantic-text-muted);
+  font-style: italic;
+}

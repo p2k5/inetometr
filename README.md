@@ -132,6 +132,20 @@ pytest tests/ -v
 ruff check src/
 ```
 
+## Резервное копирование и восстановление
+
+Скрипты управления данными находятся в `scripts/`:
+
+| Команда | Описание |
+|---------|----------|
+| `python scripts/backup_db.py` | Создать бэкап SQLite БД и JSON Lines |
+| `python scripts/backup_db.py --compress --max-backups 30` | Бэкап со сжатием и ротацией |
+| `python scripts/restore_db.py --backup-file backups/speed_data.db_...` | Восстановить БД из бэкапа |
+| `python scripts/validate_db.py` | Проверить целостность данных |
+| `python scripts/validate_db.py --check-health` | Быстрая проверка здоровья |
+| `python scripts/cleanup_old_data.py --days 90` | Удалить данные старше 90 дней |
+| `python scripts/cleanup_old_data.py --max-records 100 --archive` | Оставить 100 новых записей + архив |
+
 ## Лицензия
 
 MIT

@@ -41,6 +41,8 @@
                 <th>↓ Мбит/с</th>
                 <th>↑ Мбит/с</th>
                 <th>пинг, мс</th>
+                <th>джиттер, мс</th>
+                <th>HTTPS латентность, мс</th>
               </tr>
             </thead>
             <tbody id="rows"></tbody>
@@ -83,6 +85,8 @@
             <td>${x.download||'нет данных'}</td>
             <td>${x.upload||'нет данных'}</td>
             <td>${x.ping||'нет данных'}</td>
+            <td>${x.jitter !== undefined ? x.jitter : '-'}</td>
+            <td>${x.https_latency !== undefined ? x.https_latency : '-'}</td>
           </tr>`).join('');
       })();
     </script>

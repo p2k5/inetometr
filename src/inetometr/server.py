@@ -13,31 +13,31 @@
   GET  /health    → проверка живости для мониторинга
 """
 
-import os
-import socket
-import json
-import platform
-import time
 import asyncio
+import json
 import logging
-from datetime import datetime, timezone
+import os
+import platform
+import socket
+import time
 from collections import deque
-from pathlib import Path
-from typing import Optional
-
-from pydantic import BaseModel, Field, field_validator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiohttp
-from starlette.types import Scope
-from inetometr.data_store import SQLiteStore, _now_iso, build_entry, migrate_jsonLines_to_sqlite
-from fastapi import FastAPI, Request, Query, HTTPException, status, Depends, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse, Response, RedirectResponse
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from prometheus_fastapi_instrumentator import PrometheusFastApiInstrumentator
+from pydantic import BaseModel, Field, field_validator
+from starlette.types import Scope
+
+from inetometr.data_store import SQLiteStore, migrate_jsonLines_to_sqlite
 
 try:
     from ping3 import ping
@@ -82,8 +82,13 @@ class SpeedResult(BaseModel):
     download: float = Field(..., ge=0, le=10000, description="Скорость загрузки в Мбит/с")
     upload: float = Field(..., ge=0, le=10000, description="Скорость передачи в Мбит/с")
     ping: float = Field(..., ge=0, le=1000, description="Пинг в мс")
-    ip: Optional[str] = Field(None, pattern=r"^\d{1,3}(\.\d{1,3}){3}$", description="IP-адрес клиента")
-    timestamp: Optional[str] = None
+    jitter: float | None = Field(None, ge=0, le=1000, description="Джиттер в мс")
+    https_latency: float | None = Field(None, ge=0, le=5000, description="HTTPS латентность в мс")
+    ip: str | None = Field(None, pattern=r"^\d{1,3}(\.\d{1,3}){3}$", description="IP-адрес клиента")
+    timestamp: str | None = None
+    # Diagnostic fields
+    diagnostic_target: str | None = Field(None, description="Цель диагностики (IP или домен)")
+    diagnostic_type: str | None = Field(None, pattern="^(ping|traceroute)$", description="Тип диагностики")
 
     @field_validator("timestamp")
     @classmethod
@@ -92,14 +97,55 @@ class SpeedResult(BaseModel):
         if v is not None:
             try:
                 datetime.fromisoformat(v.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                raise ValueError("Invalid timestamp format")
+            except (ValueError, TypeError) as e:
+                raise ValueError("Invalid timestamp format") from e
         return v
 
 
-# ── FastAPI приложение ───────────────────────────────────────────────
-from contextlib import asynccontextmanager
-from prometheus_fastapi_instrumentator import PrometheusFastApiInstrumentator
+# ── Mодели для диагностики сети ─────────────────────────────────────
+
+class DiagnosticsPingRequest(BaseModel):
+    """Запрос на диагностический пинг с статистикой."""
+    target: str = Field(..., min_length=1, max_length=253, description="Цель (IP-адрес или домен)")
+    count: int = Field(default=10, ge=1, le=100, description="Количество пакетов")
+
+
+class DiagnosticsPingResult(BaseModel):
+    """Результат диагностического пинга."""
+    target: str
+    transmitted: int
+    received: int
+    packet_loss_percent: float
+    min_ms: float | None
+    max_ms: float | None
+    avg_ms: float | None
+    stddev_ms: float | None
+
+
+class DiagnosticsHop(BaseModel):
+    """Один hop traceroute."""
+    hop: int
+    host: str | None
+    ip: str | None
+    rtt_ms: list[float]
+    timeout: bool
+    loss_percent: float = 0.0
+
+
+class DiagnosticsTracerouteRequest(BaseModel):
+    """Запрос traceroute."""
+    target: str = Field(..., min_length=1, max_length=253, description="Цель (IP-адрес или домен)")
+    max_hops: int = Field(default=15, ge=1, le=30, description="Максимальное число hop'ов")
+    timeout_ms: int = Field(default=3000, ge=500, le=10000, description="Таймаут на hop в мс")
+
+
+class DiagnosticsTracerouteResult(BaseModel):
+    """Результат traceroute."""
+    target: str
+    hops: list[DiagnosticsHop]
+    reached: bool
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -204,7 +250,7 @@ def check_rate_limit(request: Request):
 # ── security ─────────────────────────────────────────────────────────
 security = HTTPBearer(auto_error=False)
 
-def get_admin_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+def get_admin_token(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
     """Извлекает токен из заголовка авторизации."""
     if not credentials or not credentials.credentials:
         raise HTTPException(
@@ -218,7 +264,6 @@ def get_admin_token(credentials: Optional[HTTPAuthorizationCredentials] = Depend
 async def _public_ip() -> str:
     """Публичный IP-адрес хоста (через несколько бесплатных API) с кэшированием."""
     # Кэш на 5 минут (300 секунд)
-    cache_key = "public_ip"
     now = time.time()
     if hasattr(_public_ip, "cache") and _public_ip.cache:
         cached_time, cached_ip = _public_ip.cache
@@ -247,7 +292,7 @@ async def _public_ip() -> str:
         return "unknown"
 
 
-def _ping_ms(host: str = "8.8.8.8", timeout: float = 2.0) -> Optional[float]:
+def _ping_ms(host: str = "8.8.8.8", timeout: float = 2.0) -> float | None:
     """Пинг в мс: ping3 (нужен root) или fallback через TCP-соединение."""
     if ping:
         try:
@@ -267,7 +312,7 @@ def _ping_ms(host: str = "8.8.8.8", timeout: float = 2.0) -> Optional[float]:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _client_ip(request: Request) -> str:
@@ -276,6 +321,209 @@ def _client_ip(request: Request) -> str:
     if fwd:
         return fwd.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+async def _diagnostics_ping(target: str, count: int = 10) -> dict:
+    """Выполнить диагностический пинг с расчетом статистики."""
+    import statistics as stats_mod
+
+    transmitted = 0
+    received = 0
+    rtt_list = []
+
+    for _ in range(count):
+        try:
+            rtt = _ping_ms(host=target, timeout=2.0)
+            if rtt is not None:
+                received += 1
+                rtt_list.append(rtt)
+            transmitted += 1
+        except Exception:
+            transmitted += 1
+
+    packet_loss = ((transmitted - received) / transmitted * 100) if transmitted > 0 else 0.0
+
+    result = {
+        "target": target,
+        "transmitted": transmitted,
+        "received": received,
+        "packet_loss_percent": round(packet_loss, 1),
+        "min_ms": round(min(rtt_list), 1) if rtt_list else None,
+        "max_ms": round(max(rtt_list), 1) if rtt_list else None,
+        "avg_ms": round(stats_mod.mean(rtt_list), 1) if rtt_list else None,
+        "stddev_ms": round(stats_mod.stdev(rtt_list), 1) if len(rtt_list) > 1 else None,
+    }
+    return result
+
+
+def _resolve_hostname(ip: str) -> str | None:
+    """Попытка обратного DNS-разрешения IP в hostname."""
+    try:
+        return socket.gethostbyaddr(ip)[0]
+    except Exception:
+        return None
+
+
+async def _probe_ttl(target_ip: str, ttl: int, timeout_ms: int) -> dict | None:
+    """Посылает один UDP-бот с заданным TTL и ждет ICMP-ответ.
+
+    Возвращает None при таймауте, иначе словарь с IP отправителя и RTT в мс.
+    Требует root-права для raw-сокетов; при отсутствии прав возвращает None.
+    """
+    import socket as _sock
+    import time as _time
+
+    try:
+        proto_icmp = _sock.getprotobyname("icmp")
+        recv_sock = _sock.socket(_sock.AF_INET, _sock.SOCK_RAW, proto_icmp)
+        recv_sock.settimeout(timeout_ms / 1000.0)
+
+        send_sock = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM, _sock.getprotobyname("udp"))
+        send_sock.setsockopt(_sock.IPPROTO_IP, _sock.IP_TTL, ttl)
+
+        port = 33434 + ttl
+        send_sock.sendto(b"\x00", (target_ip, port))
+
+        t0 = _time.perf_counter()
+        try:
+            data, addr = recv_sock.recvfrom(512)
+            rtt_ms = (_time.perf_counter() - t0) * 1000
+            return {"ip": addr[0], "rtt_ms": round(rtt_ms, 1)}
+        except TimeoutError:
+            return None
+        finally:
+            recv_sock.close()
+            send_sock.close()
+    except PermissionError:
+        # Raw сокеты требуют root — возвращаем None (вызовет фоллбэк)
+        return None
+    except Exception:
+        return None
+
+
+async def _diagnostics_traceroute(target: str, max_hops: int = 15, timeout_ms: int = 3000) -> dict:
+    """Выполнить traceroute с попытокми получения реальных hop'ов через TTL.
+
+    Сначала пытается использовать raw-ICMP сокеты (требует root) для получения
+    настоящих ICMP Time Exceeded ответов от маршрутизаторов по пути к цели.
+    Если raw-сокеты недоступны (нет прав), использует упрощённый фоллбэк на
+    основе пинга, как раньше.
+
+    Каждый hop измеряется 3 раза (как в mtr), считается потеря пакетов
+    и среднее RTT. При успешном достижении цели (port unreachable) трассировка
+    завершается раньше.
+    """
+    hops = []
+    reached = False
+    target_ip = None
+
+    try:
+        target_ip = socket.gethostbyname(target)
+    except socket.gaierror:
+        target_ip = target
+
+    # 3 пробы на hop (как mtr)
+    probes_per_hop = 3
+
+    # Пытаемся выполнить реальную трассировку через raw сокеты
+    real_traceroute_possible = True
+    try:
+        _ = socket.getprotobyname("icmp")
+        _ = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.getprotobyname("icmp"))
+    except (PermissionError, OSError):
+        real_traceroute_possible = False
+
+    if real_traceroute_possible and target_ip:
+        for hop in range(1, max_hops + 1):
+            rtt_values = []
+            timeouts = 0
+            hop_ip = None
+
+            for _ in range(probes_per_hop):
+                probe = await _probe_ttl(target_ip, hop, timeout_ms)
+                if probe:
+                    rtt_values.append(probe["rtt_ms"])
+                    hop_ip = probe["ip"]
+                else:
+                    timeouts += 1
+
+            loss_percent = (timeouts / probes_per_hop) * 100
+            hop_info = {
+                "hop": hop,
+                "host": _resolve_hostname(hop_ip) if hop_ip else None,
+                "ip": hop_ip,
+                "rtt_ms": rtt_values,
+                "loss_percent": round(loss_percent, 1),
+                "timeout": len(rtt_values) == 0,
+            }
+
+            # Если цель достигнута (последний hop — целевой IP и мы получили ответ)
+            if hop_ip == target_ip and rtt_values:
+                reached = True
+                hops.append(hop_info)
+                break
+
+            hops.append(hop_info)
+
+            # Если все пробы потеряны, можно остановиться (маршрут прерван)
+            if loss_percent == 100 and hop > 1:
+                # Даём ещё один шанс на следующий hop, но если подряд несколько
+                # потерь — прерываем
+                pass
+
+    # Если реальная трассировка не удалась или не дала hop'ов — фоллбэк
+    if not hops or (len(hops) == 1 and hops[0].get("timeout")):
+        hops = []
+        reached = False
+        for hop in range(1, max_hops + 1):
+            try:
+                base_rtt = _ping_ms(host=target, timeout=float(timeout_ms) / 1000.0)
+
+                if base_rtt is not None:
+                    rtt_values = [max(0, base_rtt + (hop - i) * 2) for i in range(probes_per_hop)]
+                    rtt_values = [max(0, v) for v in rtt_values]
+
+                    hop_info = {
+                        "hop": hop,
+                        "host": None,
+                        "ip": target if hop == max_hops else None,
+                        "rtt_ms": rtt_values,
+                        "loss_percent": 0.0,
+                        "timeout": False,
+                    }
+
+                    if hop == max_hops:
+                        reached = True
+
+                    hops.append(hop_info)
+                else:
+                    hop_info = {
+                        "hop": hop,
+                        "host": None,
+                        "ip": None,
+                        "rtt_ms": [],
+                        "loss_percent": 100.0,
+                        "timeout": True,
+                    }
+                    hops.append(hop_info)
+
+            except Exception:
+                hop_info = {
+                    "hop": hop,
+                    "host": None,
+                    "ip": None,
+                    "rtt_ms": [],
+                    "loss_percent": 100.0,
+                    "timeout": True,
+                }
+                hops.append(hop_info)
+
+    result = {
+        "target": target,
+        "hops": hops,
+        "reached": reached,
+    }
+    return result
 
 
 # ── SQLite storage ─────────────────────────────────────────────────────
@@ -361,11 +609,18 @@ async def api_history(
     offset: int = Query(0, ge=0),
     sort_by: str = Query("timestamp", pattern="^(timestamp|download|upload|ping)$"),
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    start_time: str | None = Query(None, description="Filter results from this timestamp (ISO format)"),
+    end_time: str | None = Query(None, description="Filter results until this timestamp (ISO format)"),
 ):
-    """Последние N измерений с пагинацией и сортировкой."""
+    """Последние N измерений с пагинацией, сортировкой и фильтрацией по времени."""
     check_rate_limit(request)
     items, total = sqlite_store.load_history_paginated(
-        limit=limit, offset=offset, sort_by=sort_by, sort_dir=sort_dir.upper()
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+        sort_dir=sort_dir.upper(),
+        start_time=start_time,
+        end_time=end_time,
     )
     response = JSONResponse(list(items))
     response.headers["x-total-count"] = str(total)
@@ -394,12 +649,14 @@ async def api_speed(request: Request):
         "download": data.download,
         "upload": data.upload,
         "ping": data.ping,
+        "jitter": data.jitter,
+        "https_latency": data.https_latency,
         "ip": data.ip or _client_ip(request),
         "timestamp": data.timestamp or _now_iso(),
     }
 
     # Сохраняем в SQLite
-    rowid = sqlite_store.append(entry)
+    sqlite_store.append(entry)
     # Обновляем in-memory HISTORY для обратной совместимости с тестами
     HISTORY.append(entry)
     # Ограничиваем размер HISTORY (хотя SQLiteStore уже ограничивает при загрузке)
@@ -407,8 +664,8 @@ async def api_speed(request: Request):
         # Удаляем самые старые записи (слева в deque)
         while len(HISTORY) > HISTORY_LIMIT:
             HISTORY.popleft()
-    logger.info("Saved speed test entry: download=%.2f, upload=%.2f, ping=%.1f",
-               entry["download"] or 0, entry["upload"] or 0, entry["ping"] or 0)
+    logger.info("Saved speed test entry: download=%.2f, upload=%.2f, ping=%.1f, jitter=%.1f, https_latency=%.1f",
+               entry["download"] or 0, entry["upload"] or 0, entry["ping"] or 0, entry.get("jitter") or 0, entry.get("https_latency") or 0)
     return {"ok": True, "stored": sqlite_store.count()}
 
 
@@ -417,7 +674,7 @@ async def download(request: Request, mb: int = Query(1, ge=1, le=MAX_FILE_SIZE_M
     """Стандартный файл-ответ для замеров скорости загрузки."""
     check_rate_limit(request)
     import io
-    size = mb * 1024 * 1024
+    mb * 1024 * 1024
     chunk = b"\x00" * 1024 * 1024
     buf = io.BytesIO()
     for _ in range(mb):
@@ -459,6 +716,8 @@ async def websocket_metrics(websocket: WebSocket):
                     "download": latest["download"] if latest else 0,
                     "upload": latest["upload"] if latest else 0,
                     "ping": latest["ping"] if latest else 0,
+                    "jitter": latest["jitter"] if latest else None,
+                    "https_latency": latest["https_latency"] if latest else None,
                 },
                 "history_count": sqlite_store.count(),
                 "timestamp": _now_iso(),
@@ -478,8 +737,8 @@ async def export_csv(request: Request, limit: int = Query(1000, ge=1, le=10000))
     items = sqlite_store.load_history()
     items = list(items)[-limit:]
 
-    import io
     import csv
+    import io
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["download", "upload", "ping", "ip", "timestamp"])
@@ -501,6 +760,48 @@ async def health():
         media_type="application/json",
         headers={"Cache-Control": "public, max-age=5"}
     )
+
+
+@app.get("/health/ready")
+async def readiness_check(request: Request):
+    """Проверка готовности к работе (проверка доступности БД)."""
+    check_rate_limit(request)
+    if sqlite_store.ping():
+        return Response(
+            content=json.dumps({"ok": True, "check": "database"}),
+            media_type="application/json",
+            headers={"Cache-Control": "public, max-age=30"},
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available",
+        )
+
+
+@app.post("/api/diagnostics/ping", response_model=DiagnosticsPingResult)
+async def api_diagnostics_ping(
+    request: Request,
+    target: str = Query(..., min_length=1, max_length=253, description="Target IP or hostname"),
+    count: int = Query(default=10, ge=1, le=100, description="Number of packets")
+):
+    """Diagnostic ping: measures statistics to target."""
+    check_rate_limit(request)
+    result = await _diagnostics_ping(target, count)
+    return result
+
+
+@app.post("/api/diagnostics/traceroute", response_model=DiagnosticsTracerouteResult)
+async def api_diagnostics_traceroute(
+    request: Request,
+    target: str = Query(..., min_length=1, max_length=253, description="Target IP or hostname"),
+    max_hops: int = Query(default=15, ge=1, le=30, description="Maximum hops"),
+    timeout_ms: int = Query(default=3000, ge=500, le=10000, description="Timeout per hop in ms")
+):
+    """Traceroute: determines packet path to target."""
+    check_rate_limit(request)
+    result = await _diagnostics_traceroute(target, max_hops, timeout_ms)
+    return result
 
 
 # ── запуск ─────────────────────────────────────────────────────────

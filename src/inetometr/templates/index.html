@@ -38,7 +38,7 @@
           <div class="hero__label" id="hero-label">скорость загрузки</div>
         </div>
 
-        <!-- Secondary metrics: upload and ping -->
+        <!-- Secondary metrics: upload, ping, jitter, https latency, download -->
         <div class="metrics" id="metrics" aria-live="polite">
           <div class="metric">
             <span class="metric__value" id="metric-up" aria-label="Скорость передачи">нет данных</span>
@@ -48,6 +48,14 @@
           </div>
           <div class="metric">
             <span class="metric__value" id="metric-ping" aria-label="Пинг">нет данных</span>
+            <span class="metric__label">мс</span>
+          </div>
+          <div class="metric">
+            <span class="metric__value" id="metric-jitter" aria-label="Джиттер">нет данных</span>
+            <span class="metric__label">мс</span>
+          </div>
+          <div class="metric">
+            <span class="metric__value" id="metric-https" aria-label="HTTPS латентность">нет данных</span>
             <span class="metric__label">мс</span>
           </div>
           <div class="metric">
@@ -73,6 +81,32 @@
             Начать тест
           </button>
         </div>
+
+        <!-- Diagnostics section -->
+        <div id="diagnostics-section" style="margin-top: var(--semantic-space-4);">
+          <button type="button" id="run-traceroute-btn" class="btn" aria-label="Запустить диагностический traceroute">
+            Traceroute
+          </button>
+
+          <div id="traceroute-results" class="traceroute-results" style="margin-top: var(--semantic-space-4); max-height: var(--semantic-space-16); overflow-y: auto; display: none;">
+            <h3 class="sr-only">Результаты traceroute</h3>
+            <table class="traceroute-table">
+              <thead>
+                <tr>
+                  <th>Хоп</th>
+                  <th>IP-адрес</th>
+                  <th>Хостнейм</th>
+                  <th>RTT (мс)</th>
+                  <th>Потери %</th>
+                </tr>
+              </thead>
+              <tbody id="traceroute-table-body"></tbody>
+            </table>
+            <div id="traceroute-summary" style="margin-top: var(--semantic-space-2); font-size: var(--semantic-text-xs); color: var(--semantic-text-muted);">
+              Маршрут: <span id="reached-text"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -81,6 +115,6 @@
       <a href="/health" target="_blank" rel="noopener noreferrer">health</a>
     </footer>
 
-    <script type="module" src="/static/js/app.js"></script>
+    <script type="module" src="/static/js/app.js?v=2"></script>
   </body>
 </html>
