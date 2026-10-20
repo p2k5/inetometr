@@ -35,34 +35,76 @@
             </div>
             <div class="hero__unit" id="hero-unit">Мбит/с</div>
           </div>
-          <div class="hero__label" id="hero-label">скорость загрузки</div>
+          <div class="hero__label" id="hero-label">Скорость загрузки</div>
+          <div class="quality-badge" id="quality-badge" aria-label="Качество соединения">-</div>
         </div>
 
         <!-- Secondary metrics: upload, ping, jitter, https latency, download -->
         <div class="metrics" id="metrics" aria-live="polite">
           <div class="metric">
             <span class="metric__value" id="metric-up" aria-label="Скорость передачи">нет данных</span>
+            <span class="metric__unit">Мбит/с</span>
             <span class="metric__label">
-              <span class="direction">↑</span> Мбит/с
+              <span class="direction">↑</span> передача
             </span>
           </div>
           <div class="metric">
             <span class="metric__value" id="metric-ping" aria-label="Пинг">нет данных</span>
-            <span class="metric__label">мс</span>
+            <span class="metric__unit">мс</span>
+            <span class="metric__label">пинг</span>
+            <span class="metric__quality" id="quality-ping">-</span>
           </div>
           <div class="metric">
             <span class="metric__value" id="metric-jitter" aria-label="Джиттер">нет данных</span>
-            <span class="metric__label">мс</span>
+            <span class="metric__unit">мс</span>
+            <span class="metric__label">джиттер</span>
+            <span class="metric__quality" id="quality-jitter">-</span>
           </div>
           <div class="metric">
             <span class="metric__value" id="metric-https" aria-label="HTTPS латентность">нет данных</span>
-            <span class="metric__label">мс</span>
+            <span class="metric__unit">мс</span>
+            <span class="metric__label">HTTPS латентность</span>
+            <span class="metric__quality" id="quality-https">-</span>
           </div>
           <div class="metric">
             <span class="metric__value" id="metric-down" aria-label="Скорость загрузки">нет данных</span>
+            <span class="metric__unit">Мбит/с</span>
             <span class="metric__label">
-              <span class="direction">↓</span> Мбит/с
+              <span class="direction">↓</span> загрузка
             </span>
+          </div>
+        </div>
+
+        <!-- Experience ratings (оценки опыта использования) -->
+        <div id="experience-ratings" class="experience-ratings" aria-label="Оценки опыта использования">
+          <div class="experience-card" id="card-4k">
+            <span class="experience-card__icon" aria-hidden="true">[4K]</span>
+            <span class="experience-card__title">4K видео</span>
+            <span class="experience-card__value" id="rating-4k" data-rating="insufficient">-</span>
+            <span class="experience-card__sub" id="rating-4k-sub">Недостаточно данных</span>
+          </div>
+          <div class="experience-card" id="card-video">
+            <span class="experience-card__icon" aria-hidden="true">[Видео]</span>
+            <span class="experience-card__title">Видеозвонки</span>
+            <span class="experience-card__value" id="rating-video" data-rating="insufficient">-</span>
+            <span class="experience-card__sub" id="rating-video-sub">Недостаточно данных</span>
+          </div>
+          <div class="experience-card" id="card-gaming">
+            <span class="experience-card__icon" aria-hidden="true">[Игры]</span>
+            <span class="experience-card__title">Онлайн-игры</span>
+            <span class="experience-card__value" id="rating-gaming" data-rating="insufficient">-</span>
+            <span class="experience-card__sub" id="rating-gaming-sub">Недостаточно данных</span>
+          </div>
+        </div>
+
+        <!-- Comparison with previous measurement -->
+        <div id="comparison" class="comparison" aria-label="Сравнение с предыдущим результатом">
+          <div class="comparison__header">
+            <span class="comparison__title">Предыдущий результат</span>
+            <span class="comparison__time" id="comparison-time">нет данных</span>
+          </div>
+          <div class="comparison__row" id="comparison-row">
+            <span class="comparison__empty">Недостаточно данных для сравнения</span>
           </div>
         </div>
 

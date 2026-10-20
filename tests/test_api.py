@@ -26,6 +26,111 @@ def setup_and_cleanup():
     # Очистка rate limiter history, чтобы тесты не влияли друг на друга
     rate_limiter.history.clear()
 
+
+def compute_experience_ratings(download, upload, ping, jitter, https_latency):
+    """Mirror of JS computeExperienceRatings for testing."""
+    has_data = (download is not None) and (upload is not None) and (ping is not None)
+
+    if not has_data:
+        return {
+            '4k': {'rating': 'insufficient', 'sub': 'Недостаточно данных'},
+            'video': {'rating': 'insufficient', 'sub': 'Недостаточно данных'},
+            'gaming': {'rating': 'insufficient', 'sub': 'Недостаточно данных'},
+        }
+
+    # 4K streaming: needs download >= 25 Mbps and stable connection (jitter <= 30)
+    if download >= 25 and (jitter is None or jitter <= 30):
+        four_k = {'rating': 'comfortable', 'sub': 'Комфортно'}
+    elif download >= 15:
+        four_k = {'rating': 'limited', 'sub': 'Возможны буферизации'}
+    else:
+        four_k = {'rating': 'limited', 'sub': 'Низкая скорость'}
+
+    # Video calls: needs jitter <= 30 and ping <= 150
+    if (jitter is None or jitter <= 30) and ping <= 150:
+        video = {'rating': 'comfortable', 'sub': 'Комфортно'}
+    elif jitter is None or jitter <= 60:
+        video = {'rating': 'limited', 'sub': 'Возможны задержки'}
+    else:
+        video = {'rating': 'limited', 'sub': 'Высокий джиттер'}
+
+    # Online gaming: needs ping <= 50 and jitter <= 10
+    if ping <= 50 and (jitter is None or jitter <= 10):
+        gaming = {'rating': 'comfortable', 'sub': 'Комфортно'}
+    elif ping <= 100:
+        gaming = {'rating': 'limited', 'sub': 'Лаги возможны'}
+    else:
+        gaming = {'rating': 'limited', 'sub': 'Высокий пинг'}
+
+    return {'4k': four_k, 'video': video, 'gaming': gaming}
+
+
+def compute_delta(cur, prev, lower_is_better):
+    """Mirror of JS fmtDelta for testing comparison deltas."""
+    if cur is None or prev is None:
+        return None
+    delta = cur - prev
+    if delta == 0:
+        return {'text': '0', 'cls': 'delta-neutral'}
+    up = delta > 0
+    good = (not up) if lower_is_better else up
+    return {
+        'text': ('+' if up else '') + str(round(delta * 10) / 10),
+        'cls': 'delta-good' if good else 'delta-bad',
+    }
+
+
+def test_comparison_delta_logic():
+    """Тест расчёта дельты сравнения с предыдущим результатом."""
+    # Скорость загрузки: выше — лучше
+    assert compute_delta(100.0, 90.0, lower_is_better=False) == {'text': '+10.0', 'cls': 'delta-good'}
+    assert compute_delta(80.0, 90.0, lower_is_better=False) == {'text': '-10.0', 'cls': 'delta-bad'}
+    assert compute_delta(90.0, 90.0, lower_is_better=False) == {'text': '0', 'cls': 'delta-neutral'}
+
+    # Пинг: ниже — лучше
+    assert compute_delta(10.0, 20.0, lower_is_better=True) == {'text': '-10.0', 'cls': 'delta-good'}
+    assert compute_delta(30.0, 20.0, lower_is_better=True) == {'text': '+10.0', 'cls': 'delta-bad'}
+
+    # Джиттер: ниже — лучше
+    assert compute_delta(5.0, 10.0, lower_is_better=True) == {'text': '-5.0', 'cls': 'delta-good'}
+
+    # Недостаточно данных
+    assert compute_delta(None, 10.0, False) is None
+    assert compute_delta(10.0, None, False) is None
+    assert compute_delta(None, None, False) is None
+
+
+def test_experience_ratings_logic():
+    """Тест функции расчёта оценок опыта (зеркало JS computeExperienceRatings)."""
+    # Нет данных — insufficient для всех сценариев
+    assert compute_experience_ratings(None, None, None, None, None) == {
+        '4k': {'rating': 'insufficient', 'sub': 'Недостаточно данных'},
+        'video': {'rating': 'insufficient', 'sub': 'Недостаточно данных'},
+        'gaming': {'rating': 'insufficient', 'sub': 'Недостаточно данных'},
+    }
+
+    # Комфортный сценарий: высокая скорость, низкий джиттер и пинг
+    assert compute_experience_ratings(100, 50, 10, 5, 20) == {
+        '4k': {'rating': 'comfortable', 'sub': 'Комфортно'},
+        'video': {'rating': 'comfortable', 'sub': 'Комфортно'},
+        'gaming': {'rating': 'comfortable', 'sub': 'Комфортно'},
+    }
+
+    # 4K: скорость между 15 и 25 Мбит/с → limited (возможны буферизации)
+    assert compute_experience_ratings(20, 50, 10, 5, 20)['4k']['rating'] == 'limited'
+    # 4K: низкая скорость → limited (низкая скорость)
+    assert compute_experience_ratings(5, 50, 10, 5, 20)['4k']['rating'] == 'limited'
+
+    # Видеозвонки: высокий джиттер → limited (высокий джиттер)
+    assert compute_experience_ratings(100, 50, 20, 70, 20)['video']['rating'] == 'limited'
+
+    # Игры: высокий пинг → limited (высокий пинг)
+    assert compute_experience_ratings(100, 50, 120, 5, 20)['gaming']['rating'] == 'limited'
+
+    # jitter=None допускается — пинг 30 мс ≤ 150 мс → comfortable
+    assert compute_experience_ratings(30, 20, 30, None, 10)['video']['rating'] == 'comfortable'
+
+
 def test_health_endpoint():
     """Тест health endpoint"""
     client = TestClient(app)
@@ -827,6 +932,15 @@ def test_frontend_index_contains_new_metrics():
     # Проверяем, что в HTML есть id для новых метрик
     assert 'id="metric-jitter"' in html
     assert 'id="metric-https"' in html
+    # Проверяем наличие элементов оценок опыта
+    assert 'id="experience-ratings"' in html
+    assert 'id="rating-4k"' in html
+    assert 'id="rating-video"' in html
+    assert 'id="rating-gaming"' in html
+    # Проверяем наличие блока сравнения с предыдущим результатом
+    assert 'id="comparison"' in html
+    assert 'id="comparison-row"' in html
+    assert 'id="comparison-time"' in html
 
 
 def test_frontend_admin_contains_new_columns():

@@ -35,6 +35,16 @@ function connectWebSocket() {
         setVal('metric-https', data.latest.https_latency != null
           ? Math.round(data.latest.https_latency * 10) / 10 : '—');
         setHeroValue(Math.round(data.latest.download * 10) / 10);
+        updateQualityBadge(data.latest.jitter, data.latest.https_latency, data.latest.ping);
+        // Update experience ratings from latest measurements
+        const ratings = computeExperienceRatings(
+          data.latest.download,
+          data.latest.upload,
+          data.latest.ping,
+          data.latest.jitter,
+          data.latest.https_latency
+        );
+        renderExperienceRatings(ratings);
       }
     } catch (e) {
       console.debug('[ws] parse error:', e);
@@ -198,6 +208,168 @@ function setHeroValue(val) {
   heroValue.setAttribute('data-measured', 'true');
 }
 
+function updateQualityBadge(jitter, httpsLatency, ping) {
+  // Determine quality based on ping (ms), jitter (ms), and https latency (ms)
+  let quality = 'fair';
+
+  // Poor if jitter > 50ms or https latency > 200ms
+  if ((jitter !== undefined && jitter > 50) || (httpsLatency !== undefined && httpsLatency > 200)) {
+    quality = 'poor';
+  } else if ((jitter !== undefined && jitter > 30) || (httpsLatency !== undefined && httpsLatency > 100)) {
+    quality = 'fair';
+  } else if ((jitter !== undefined && jitter > 20) || (httpsLatency !== undefined && httpsLatency > 50)) {
+    quality = 'good';
+  } else {
+    quality = 'excellent';
+  }
+
+  const badge = $('quality-badge');
+  badge.textContent = quality[0].toUpperCase() + quality.slice(1);
+  badge.setAttribute('data-quality', quality);
+}
+
+// ----- Experience ratings (оценки опыта использования) -------------------
+//
+// Thresholds are documented and versioned. When data is missing the rating
+// is "insufficient" and the UI shows "Недостаточно данных" instead of guessing.
+
+function computeExperienceRatings(download, upload, ping, jitter, httpsLatency) {
+  // Returns {4k: {rating, sub}, video: {rating, sub}, gaming: {rating, sub}}
+
+  const hasData = (download != null) && (upload != null) && (ping != null);
+
+  if (!hasData) {
+    return {
+      '4k': { rating: 'insufficient', sub: 'Недостаточно данных' },
+      video: { rating: 'insufficient', sub: 'Недостаточно данных' },
+      gaming: { rating: 'insufficient', sub: 'Недостаточно данных' },
+    };
+  }
+
+  // 4K streaming: needs download >= 25 Mbps and stable connection (jitter <= 30)
+  let fourK;
+  if (download >= 25 && (jitter == null || jitter <= 30)) {
+    fourK = { rating: 'comfortable', sub: 'Комфортно' };
+  } else if (download >= 15) {
+    fourK = { rating: 'limited', sub: 'Возможны буферизации' };
+  } else {
+    fourK = { rating: 'limited', sub: 'Низкая скорость' };
+  }
+
+  // Video calls: needs jitter <= 30 and ping <= 150
+  let video;
+  if ((jitter == null || jitter <= 30) && ping <= 150) {
+    video = { rating: 'comfortable', sub: 'Комфортно' };
+  } else if (jitter == null || jitter <= 60) {
+    video = { rating: 'limited', sub: 'Возможны задержки' };
+  } else {
+    video = { rating: 'limited', sub: 'Высокий джиттер' };
+  }
+
+  // Online gaming: needs ping <= 50 and jitter <= 10
+  let gaming;
+  if (ping <= 50 && (jitter == null || jitter <= 10)) {
+    gaming = { rating: 'comfortable', sub: 'Комфортно' };
+  } else if (ping <= 100) {
+    gaming = { rating: 'limited', sub: 'Лаги возможны' };
+  } else {
+    gaming = { rating: 'limited', sub: 'Высокий пинг' };
+  }
+
+  return { '4k': fourK, video: video, gaming: gaming };
+}
+
+function renderExperienceRatings(ratings) {
+  const set = (id, r) => {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = r.rating === 'comfortable' ? 'Хорошо'
+      : r.rating === 'limited' ? 'Ограничено'
+      : '-';
+    el.setAttribute('data-rating', r.rating);
+    const sub = $(id + '-sub');
+    if (sub) sub.textContent = r.sub;
+  };
+
+  set('rating-4k', ratings['4k']);
+  set('rating-video', ratings.video);
+  set('rating-gaming', ratings.gaming);
+}
+
+// ----- Comparison with previous measurement (сравнение с предыдущим) -----
+//
+function fmtDelta(cur, prev, lowerIsBetter) {
+  // Returns {text: string, cls: string} or null if insufficient data
+  if (cur == null || prev == null) return null;
+  const delta = cur - prev;
+  if (delta === 0) return { text: '0', cls: 'delta-neutral' };
+  const up = delta > 0;
+  const good = lowerIsBetter ? !up : up; // improvement if (lowerIsBetter && delta<0) or (!lowerIsBetter && delta>0)
+  return {
+    text: (up ? '+' : '') + Math.round(delta * 10) / 10,
+    cls: good ? 'delta-good' : 'delta-bad',
+  };
+}
+
+function renderComparison(data) {
+  const row = $('comparison-row');
+  const timeEl = $('comparison-time');
+  if (!data || !data.cur) {
+    row.innerHTML = '<span class="comparison__empty">Недостаточно данных для сравнения</span>';
+    timeEl.textContent = 'нет данных';
+    return;
+  }
+  const { cur, prev } = data;
+  const prevTime = prev.timestamp ? prev.timestamp.replace('T',' ').replace('Z','').slice(0,16) : '?';
+  timeEl.textContent = prevTime;
+
+  const fields = [
+    { label: '↓', value: cur.download, prev: prev.download, unit: 'Мбит/с', lowerIsBetter: false },
+    { label: '↑', value: cur.upload, prev: prev.upload, unit: 'Мбит/с', lowerIsBetter: false },
+    { label: 'пинг', value: cur.ping, prev: prev.ping, unit: 'мс', lowerIsBetter: true },
+    { label: 'джиттер', value: cur.jitter, prev: prev.jitter, unit: 'мс', lowerIsBetter: true },
+  ];
+
+  const items = fields.map(f => {
+    const d = fmtDelta(f.value, f.prev, f.lowerIsBetter);
+    if (!d) {
+      return `
+        <div class="comparison__item">
+          <div class="comparison__label">${f.label}</div>
+          <div class="comparison__prev">—</div>
+          <div class="comparison__delta"></div>
+          <div class="comparison__arrow"></div>
+        </div>`;
+    }
+    return `
+      <div class="comparison__item" data-trend="${d.cls === 'delta-good' ? 'improved' : d.cls === 'delta-bad' ? 'worse' : 'same'}">
+        <div class="comparison__label">${f.label}</div>
+        <div class="comparison__prev">${f.prev !== null ? f.prev.toFixed(1) : '—'}</div>
+        <div class="comparison__delta ${d.cls}">${d.text} ${f.unit}</div>
+        <div class="comparison__arrow">${f.value !== null && f.prev !== null ? (f.value > f.prev ? '↑' : f.value < f.prev ? '↓' : '→') : ''}</div>
+      </div>`;
+  }).join('');
+
+  row.innerHTML = items;
+}
+
+async function loadComparison() {
+  try {
+    const r = await fetch('/api/history?limit=2');
+    const items = await r.json();
+    if (!items || items.length < 2) {
+      renderComparison({ cur: items && items[0] ? items[0] : null, prev: null });
+      return;
+    }
+    const cur = items[0]; // newest (timestamp desc)
+    const prev = items[1];
+    renderComparison({ cur, prev });
+  } catch (e) {
+    console.debug('[comparison] load failed:', e);
+    renderComparison({ cur: null, prev: null });
+  }
+}
+
 // ----- Main test flow ----------------------------------------------------
 
 async function runTest() {
@@ -249,6 +421,16 @@ async function runTest() {
     setStatus('Тест завершён (сохранение не удалось).', { result: 'Ошибка сохранения' });
   }
 
+  // Update quality badge based on results
+  updateQualityBadge(jitter, httpsLatency, pingMs);
+
+  // Update experience ratings based on measured values
+  const ratings = computeExperienceRatings(down, up, pingMs, jitter, httpsLatency);
+  renderExperienceRatings(ratings);
+
+  // Load comparison with previous measurement
+  await loadComparison();
+
   // Reset progress bar after delay
   setTimeout(() => {
     setProgress(0);
@@ -265,6 +447,8 @@ function resetUI() {
   setProgress(0);
   setStatus('Нажмите Начать тест. Замеряем ваш IP и пинг сервера.');
   startBtn.disabled = false;
+  $('quality-badge').textContent = '-';
+  $('quality-badge').removeAttribute('data-quality');
 }
 
 // ----- Event listeners ---------------------------------------------------
@@ -335,6 +519,8 @@ runTracerouteBtn.addEventListener('click', async () => {
   }
   // Подключаемся к WebSocket после успешного API-запроса
   connectWebSocket();
+  // Загружаем сравнение с предыдущим результатом
+  loadComparison();
 })();
 
 // Очистка при закрытии окна

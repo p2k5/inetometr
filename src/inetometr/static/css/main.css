@@ -110,6 +110,7 @@ a {
    ============================================================ */
 .hero {
   margin: var(--semantic-space-4) 0 var(--semantic-space-8);
+  position: relative;
 }
 
 .hero__inner {
@@ -148,6 +149,52 @@ a {
   color: var(--semantic-text-primary);
 }
 
+/* Quality badge */
+.quality-badge {
+  position: absolute;
+  top: calc(100% + var(--semantic-space-2));
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--semantic-space-1);
+  padding: var(--semantic-space-1) var(--semantic-space-3);
+  border-radius: var(--component-btn-radius);
+  font-size: var(--semantic-text-xs);
+  font-weight: var(--semantic-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--semantic-surface-elevated);
+  border: var(--component-card-border);
+  color: var(--semantic-text-muted);
+  white-space: nowrap;
+}
+
+.quality-badge[data-quality="excellent"] {
+  background: var(--semantic-feedback-success);
+  color: var(--semantic-feedback-success-text, white);
+  border-color: var(--semantic-feedback-success);
+}
+
+.quality-badge[data-quality="good"] {
+  background: var(--semantic-feedback-success);
+  color: var(--semantic-feedback-success-text, white);
+  border-color: var(--semantic-feedback-success);
+}
+
+.quality-badge[data-quality="fair"] {
+  background: var(--semantic-feedback-warning);
+  color: var(--semantic-feedback-warning-text, #1a1a1a);
+  border-color: var(--semantic-feedback-warning);
+}
+
+.quality-badge[data-quality="poor"] {
+  background: var(--semantic-feedback-error);
+  color: var(--semantic-feedback-error-text, white);
+  border-color: var(--semantic-feedback-error);
+}
+
 /* ============================================================
    METRIC CHIPS (secondary metrics)
    ============================================================ */
@@ -167,6 +214,11 @@ a {
   border: var(--component-card-border);
   border-radius: var(--component-metric-radius);
   padding: var(--component-metric-padding);
+  transition: border-color var(--semantic-duration-fast) var(--semantic-easing-ease-out);
+}
+
+.metric[data-measured="true"] {
+  border-color: var(--semantic-action-primary);
 }
 
 .metric__value {
@@ -180,6 +232,15 @@ a {
   color: var(--semantic-text-muted);
   font-size: var(--semantic-text-xs);
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--semantic-space-1);
+}
+
+.metric__unit {
+  font-size: var(--semantic-text-xs);
+  color: var(--semantic-text-muted);
+  font-weight: var(--semantic-weight-medium);
 }
 
 /* Direction indicators (up/down arrows) */
@@ -187,6 +248,31 @@ a {
   display: inline-flex;
   align-items: center;
   gap: var(--component-direction-gap);
+}
+
+/* Metric quality indicator */
+.metric__quality {
+  font-size: var(--semantic-text-xs);
+  font-weight: var(--semantic-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: var(--semantic-space-1);
+}
+
+.metric__quality--excellent {
+  color: var(--semantic-feedback-success);
+}
+
+.metric__quality--good {
+  color: var(--semantic-feedback-success);
+}
+
+.metric__quality--fair {
+  color: var(--semantic-feedback-warning);
+}
+
+.metric__quality--poor {
+  color: var(--semantic-feedback-error);
 }
 
 /* ============================================================
@@ -413,7 +499,162 @@ a {
   background: var(--semantic-surface-hover);
 }
 
-/* TRACEROUTE TABLE */
+/* ============================================================
+   EXPERIENCE RATINGS (оценки опыта использования)
+   ============================================================ */
+.experience-ratings {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--semantic-space-4);
+  margin: var(--semantic-space-8) 0;
+}
+
+.experience-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--semantic-space-2);
+  background: var(--semantic-surface-elevated);
+  border: var(--component-card-border);
+  border-radius: var(--component-metric-radius);
+  padding: var(--component-metric-padding);
+}
+
+.experience-card__icon {
+  font-size: var(--semantic-text-2xl);
+}
+
+.experience-card__title {
+  font-size: var(--semantic-text-sm);
+  font-weight: var(--semantic-weight-semibold);
+  color: var(--semantic-text-primary);
+  text-align: center;
+}
+
+.experience-card__value {
+  font-size: var(--component-metric-value-size);
+  font-weight: var(--semantic-weight-bold);
+  font-family: var(--semantic-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.experience-card__value[data-rating="comfortable"] {
+  color: var(--semantic-feedback-success);
+}
+
+.experience-card__value[data-rating="limited"] {
+  color: var(--semantic-feedback-warning);
+}
+
+.experience-card__value[data-rating="insufficient"] {
+  color: var(--semantic-text-muted);
+}
+
+.experience-card__sub {
+  font-size: var(--semantic-text-xs);
+  color: var(--semantic-text-muted);
+  text-align: center;
+  line-height: var(--semantic-leading-tight);
+}
+
+/* ============================================================
+   COMPARISON WITH PREVIOUS RESULT
+   ============================================================ */
+.comparison {
+  margin: var(--semantic-space-6) 0 var(--semantic-space-4);
+  padding: var(--semantic-space-4) var(--semantic-space-5);
+  background: var(--semantic-surface-elevated);
+  border: var(--component-card-border);
+  border-radius: var(--component-metric-radius);
+}
+
+.comparison__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--semantic-space-3);
+}
+
+.comparison__title {
+  font-size: var(--semantic-text-sm);
+  font-weight: var(--semantic-weight-semibold);
+  color: var(--semantic-text-primary);
+}
+
+.comparison__time {
+  font-size: var(--semantic-text-xs);
+  color: var(--semantic-text-muted);
+}
+
+.comparison__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--semantic-space-2);
+}
+
+.comparison__empty {
+  font-size: var(--semantic-text-xs);
+  color: var(--semantic-text-muted);
+  font-style: italic;
+}
+
+.comparison__item {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 0.8fr;
+  align-items: center;
+  gap: var(--semantic-space-2);
+  font-size: var(--semantic-text-sm);
+}
+
+.comparison__item .comparison__label {
+  color: var(--semantic-text-secondary);
+  font-size: var(--semantic-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.comparison__item .comparison__prev {
+  font-family: var(--semantic-font-mono);
+  color: var(--semantic-text-muted);
+}
+
+.comparison__item .comparison__delta {
+  font-family: var(--semantic-font-mono);
+  font-weight: var(--semantic-weight-semibold);
+  font-size: var(--semantic-text-sm);
+}
+
+.comparison__item .comparison__arrow {
+  font-size: var(--semantic-text-xs);
+  color: var(--semantic-text-muted);
+}
+
+.comparison__item[data-trend="improved"] .comparison__delta {
+  color: var(--semantic-feedback-success);
+}
+
+.comparison__item[data-trend="worse"] .comparison__delta {
+  color: var(--semantic-feedback-error);
+}
+
+.comparison__item[data-trend="same"] .comparison__delta {
+  color: var(--semantic-text-muted);
+}
+
+@media screen and (max-width: 440px) {
+  .comparison__item {
+    grid-template-columns: 1fr 1fr;
+    gap: var(--semantic-space-1);
+  }
+  .comparison__item .comparison__label {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ============================================================
+   TRACEROUTE TABLE
+   ============================================================ */
 .traceroute-table {
   width: 100%;
   border-collapse: collapse;
